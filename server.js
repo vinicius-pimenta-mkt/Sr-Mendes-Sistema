@@ -19,11 +19,9 @@ const PORT = process.env.PORT || 3001;
 
 // Middlewares
 app.use(cors({
-  // --- AJUSTE SUGERIDO AQUI ---
-  // Substituímos '*' pela URL específica do seu frontend para mais segurança.
-  origin: 'https://srmendesinterface.vercel.app', 
+  origin: '*', // Permitir todas as origens para desenvolvimento
   credentials: true
-} ));
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -70,3 +68,4 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 export default app;
+
