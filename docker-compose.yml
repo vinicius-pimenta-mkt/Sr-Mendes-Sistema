@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   backend:
     build: .
@@ -8,8 +6,7 @@ services:
     ports:
       - "3001:3000"
     environment:
-      N8N_API_KEY: "019283"
-      JWT_SECRET: "019283"
+      JWT_SECRET: "sua_chave_secreta"
       ADMIN_USER: "adminmendes"
       ADMIN_PASS: "mendesbarber01"
       DATABASE_URL: "sqlite:///app/database.sqlite"
