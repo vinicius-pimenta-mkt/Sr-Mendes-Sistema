@@ -4,6 +4,97 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
+// Endpoint resumo - dados para a página de relatórios do frontend
+router.get('/resumo', verifyToken, async (req, res) => {
+  try {
+    const { periodo = 'mes' } = req.query;
+    
+    // Calcular datas baseado no período
+    let dataInicio, dataFim;
+    const hoje = new Date();
+    
+    switch (periodo) {
+      case 'semana':
+        dataInicio = new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case 'trimestre':
+        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 3, hoje.getDate());
+        break;
+      case 'semestre':
+        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 6, hoje.getDate());
+        break;
+      case 'ano':
+        dataInicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate());
+        break;
+      default: // mes
+        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate());
+    }
+    
+    dataFim = hoje;
+    const dataInicioStr = dataInicio.toISOString().split('T')[0];
+    const dataFimStr = dataFim.toISOString().split('T')[0];
+
+    // Buscar serviços mais vendidos
+    const servicosMaisVendidos = await all(`
+      SELECT 
+        servico as service, 
+        COUNT(*) as qty, 
+        SUM(COALESCE(preco, 0)) * 100 as revenue
+      FROM agendamentos 
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+      GROUP BY servico 
+      ORDER BY qty DESC 
+      LIMIT 10
+    `, [dataInicioStr, dataFimStr]);
+
+    // Buscar totais para receita
+    const receitaDiaria = await all(`
+      SELECT SUM(COALESCE(preco, 0)) as total 
+      FROM agendamentos 
+      WHERE data = ? AND status = 'Confirmado'
+    `, [hoje.toISOString().split('T')[0]]);
+
+    const receitaSemanal = await all(`
+      SELECT SUM(COALESCE(preco, 0)) as total 
+      FROM agendamentos 
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+    `, [new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], dataFimStr]);
+
+    const receitaMensal = await all(`
+      SELECT SUM(COALESCE(preco, 0)) as total 
+      FROM agendamentos 
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+    `, [dataInicioStr, dataFimStr]);
+
+    // Buscar top clientes
+    const topClientes = await all(`
+      SELECT 
+        cliente_nome as name,
+        COUNT(*) as visits,
+        MAX(data) as last_visit,
+        SUM(COALESCE(preco, 0)) * 100 as spent
+      FROM agendamentos 
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+      GROUP BY cliente_nome 
+      ORDER BY visits DESC, spent DESC
+      LIMIT 10
+    `, [dataInicioStr, dataFimStr]);
+
+    res.json({
+      by_service: servicosMaisVendidos || [],
+      totals: {
+        daily: receitaDiaria[0]?.total || 0,
+        weekly: receitaSemanal[0]?.total || 0,
+        monthly: receitaMensal[0]?.total || 0
+      },
+      top_clients: topClientes || []
+    });
+  } catch (error) {
+    console.error('Erro ao buscar resumo de relatórios:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // Dashboard - dados gerais
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
@@ -168,4 +259,3 @@ router.post('/n8n', async (req, res) => {
 });
 
 export default router;
-
