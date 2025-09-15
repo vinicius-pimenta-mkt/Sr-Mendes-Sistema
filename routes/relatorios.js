@@ -4,20 +4,22 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
+// Função auxiliar para formatar datas
+const formatDate = (date) => date.toISOString().split('T')[0];
+
 // Endpoint resumo - dados para a página de relatórios do frontend
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
     const { periodo = 'mes', data_inicio: reqDataInicio, data_fim: reqDataFim } = req.query;
     
-    // Calcular datas baseado no período ou usar as datas fornecidas
     let dataInicio, dataFim;
     const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0); // Zera a hora para comparação de data
+    hoje.setHours(0, 0, 0, 0); 
     
     if (reqDataInicio && reqDataFim) {
       dataInicio = new Date(reqDataInicio);
       dataFim = new Date(reqDataFim);
-      dataFim.setHours(23, 59, 59, 999); // Define para o final do dia
+      dataFim.setHours(23, 59, 59, 999); 
     } else {
       switch (periodo) {
         case 'hoje':
@@ -45,11 +47,11 @@ router.get('/resumo', verifyToken, async (req, res) => {
         default: // mes
           dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate());
       }
-      dataFim = hoje; // Para períodos como 'semana', 'mes', 'ano', o fim é sempre hoje
+      dataFim = hoje; 
     }
 
-    const dataInicioStr = dataInicio.toISOString().split('T')[0];
-    const dataFimStr = dataFim.toISOString().split('T')[0];
+    const dataInicioStr = formatDate(dataInicio);
+    const dataFimStr = formatDate(dataFim);
 
     // Buscar serviços mais vendidos
     const servicosMaisVendidos = await all(`
@@ -65,23 +67,53 @@ router.get('/resumo', verifyToken, async (req, res) => {
     `, [dataInicioStr, dataFimStr]);
 
     // Buscar totais para receita
-    const receitaDiaria = await all(`
+    const receitaDiariaTotal = await all(`
       SELECT SUM(COALESCE(preco, 0)) as total 
       FROM agendamentos 
       WHERE data = ? AND status = 'Confirmado'
-    `, [new Date().toISOString().split('T')[0]]); // Sempre a receita do dia atual
+    `, [formatDate(new Date())]); 
 
-    const receitaSemanal = await all(`
+    const receitaSemanalTotal = await all(`
       SELECT SUM(COALESCE(preco, 0)) as total 
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
-    `, [new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], new Date().toISOString().split('T')[0]]);
+    `, [formatDate(new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000)), formatDate(new Date())]);
 
-    const receitaMensal = await all(`
+    const receitaMensalTotal = await all(`
       SELECT SUM(COALESCE(preco, 0)) as total 
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
-    `, [new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate()).toISOString().split('T')[0], new Date().toISOString().split('T')[0]]);
+    `, [formatDate(new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate())), formatDate(new Date())]);
+
+    // Nova consulta: Receita por hora para o dia atual
+    const receitaPorHoraHoje = await all(`
+      SELECT 
+        strftime('%H:00', hora) as hour,
+        SUM(COALESCE(preco, 0)) as revenue
+      FROM agendamentos
+      WHERE data = ? AND status = 'Confirmado'
+      GROUP BY hour
+      ORDER BY hour ASC
+    `, [formatDate(new Date())]);
+
+    // Nova consulta: Receita por dia da semana para o período selecionado
+    const receitaPorDiaSemana = await all(`
+      SELECT 
+        CASE strftime('%w', data)
+          WHEN '0' THEN 'Dom'
+          WHEN '1' THEN 'Seg'
+          WHEN '2' THEN 'Ter'
+          WHEN '3' THEN 'Qua'
+          WHEN '4' THEN 'Qui'
+          WHEN '5' THEN 'Sex'
+          WHEN '6' THEN 'Sáb'
+        END as day_of_week,
+        SUM(COALESCE(preco, 0)) as revenue
+      FROM agendamentos
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+      GROUP BY day_of_week
+      ORDER BY strftime('%w', data) ASC
+    `, [dataInicioStr, dataFimStr]);
 
     // Buscar top clientes
     const topClientes = await all(`
@@ -100,10 +132,12 @@ router.get('/resumo', verifyToken, async (req, res) => {
     res.json({
       by_service: servicosMaisVendidos || [],
       totals: {
-        daily: receitaDiaria[0]?.total || 0,
-        weekly: receitaSemanal[0]?.total || 0,
-        monthly: receitaMensal[0]?.total || 0
+        daily: receitaDiariaTotal[0]?.total || 0,
+        weekly: receitaSemanalTotal[0]?.total || 0,
+        monthly: receitaMensalTotal[0]?.total || 0
       },
+      revenue_by_hour_today: receitaPorHoraHoje || [],
+      revenue_by_day_of_week: receitaPorDiaSemana || [],
       top_clients: topClientes || []
     });
   } catch (error) {
@@ -153,7 +187,7 @@ router.get('/mensal', verifyToken, async (req, res) => {
       const hoje = new Date();
       const umMesAtras = new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate());
       whereClause = 'WHERE data BETWEEN ? AND ?';
-      params = [umMesAtras.toISOString().split('T')[0], hoje.toISOString().split('T')[0]];
+      params = [formatDate(umMesAtras), formatDate(hoje)];
     }
 
     const totalAgendamentos = await all(`SELECT COUNT(*) as total FROM agendamentos ${whereClause}`, params);
