@@ -7,30 +7,47 @@ const router = express.Router();
 // Endpoint resumo - dados para a página de relatórios do frontend
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
-    const { periodo = 'mes' } = req.query;
+    const { periodo = 'mes', data_inicio: reqDataInicio, data_fim: reqDataFim } = req.query;
     
-    // Calcular datas baseado no período
+    // Calcular datas baseado no período ou usar as datas fornecidas
     let dataInicio, dataFim;
     const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0); // Zera a hora para comparação de data
     
-    switch (periodo) {
-      case 'semana':
-        dataInicio = new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case 'trimestre':
-        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 3, hoje.getDate());
-        break;
-      case 'semestre':
-        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 6, hoje.getDate());
-        break;
-      case 'ano':
-        dataInicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate());
-        break;
-      default: // mes
-        dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate());
+    if (reqDataInicio && reqDataFim) {
+      dataInicio = new Date(reqDataInicio);
+      dataFim = new Date(reqDataFim);
+      dataFim.setHours(23, 59, 59, 999); // Define para o final do dia
+    } else {
+      switch (periodo) {
+        case 'hoje':
+          dataInicio = hoje;
+          dataFim = hoje;
+          break;
+        case 'ontem':
+          dataInicio = new Date(hoje);
+          dataInicio.setDate(hoje.getDate() - 1);
+          dataFim = new Date(hoje);
+          dataFim.setDate(hoje.getDate() - 1);
+          break;
+        case 'semana':
+          dataInicio = new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'trimestre':
+          dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 3, hoje.getDate());
+          break;
+        case 'semestre':
+          dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 6, hoje.getDate());
+          break;
+        case 'ano':
+          dataInicio = new Date(hoje.getFullYear() - 1, hoje.getMonth(), hoje.getDate());
+          break;
+        default: // mes
+          dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate());
+      }
+      dataFim = hoje; // Para períodos como 'semana', 'mes', 'ano', o fim é sempre hoje
     }
-    
-    dataFim = hoje;
+
     const dataInicioStr = dataInicio.toISOString().split('T')[0];
     const dataFimStr = dataFim.toISOString().split('T')[0];
 
@@ -39,7 +56,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       SELECT 
         servico as service, 
         COUNT(*) as qty, 
-        SUM(COALESCE(preco, 0)) * 100 as revenue
+        SUM(COALESCE(preco, 0)) as revenue
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       GROUP BY servico 
@@ -52,19 +69,19 @@ router.get('/resumo', verifyToken, async (req, res) => {
       SELECT SUM(COALESCE(preco, 0)) as total 
       FROM agendamentos 
       WHERE data = ? AND status = 'Confirmado'
-    `, [hoje.toISOString().split('T')[0]]);
+    `, [new Date().toISOString().split('T')[0]]); // Sempre a receita do dia atual
 
     const receitaSemanal = await all(`
       SELECT SUM(COALESCE(preco, 0)) as total 
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
-    `, [new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], dataFimStr]);
+    `, [new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], new Date().toISOString().split('T')[0]]);
 
     const receitaMensal = await all(`
       SELECT SUM(COALESCE(preco, 0)) as total 
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
-    `, [dataInicioStr, dataFimStr]);
+    `, [new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate()).toISOString().split('T')[0], new Date().toISOString().split('T')[0]]);
 
     // Buscar top clientes
     const topClientes = await all(`
@@ -72,7 +89,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         cliente_nome as name,
         COUNT(*) as visits,
         MAX(data) as last_visit,
-        SUM(COALESCE(preco, 0)) * 100 as spent
+        SUM(COALESCE(preco, 0)) as spent
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       GROUP BY cliente_nome 
