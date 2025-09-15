@@ -4,28 +4,32 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
-// Listar todos os agendamentos
+// Listar todos os agendamentos com filtros opcionais de data_inicio, data_fim e status
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const { data, status } = req.query;
+    const { data_inicio, data_fim, status } = req.query;
     let queryText = 'SELECT * FROM agendamentos';
     let params = [];
+    const conditions = [];
 
-    if (data || status) {
-      queryText += ' WHERE';
-      const conditions = [];
-      
-      if (data) {
-        conditions.push(' data = ?');
-        params.push(data);
-      }
-      
-      if (status) {
-        conditions.push(' status = ?');
-        params.push(status);
-      }
-      
-      queryText += conditions.join(' AND');
+    if (data_inicio && data_fim) {
+      conditions.push(' data BETWEEN ? AND ?');
+      params.push(data_inicio, data_fim);
+    } else if (data_inicio) {
+      conditions.push(' data >= ?');
+      params.push(data_inicio);
+    } else if (data_fim) {
+      conditions.push(' data <= ?');
+      params.push(data_fim);
+    }
+    
+    if (status) {
+      conditions.push(' status = ?');
+      params.push(status);
+    }
+    
+    if (conditions.length > 0) {
+      queryText += ' WHERE' + conditions.join(' AND');
     }
     
     queryText += ' ORDER BY data, hora';
@@ -38,7 +42,7 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// Agendamentos de hoje
+// Agendamentos de hoje (mantido para compatibilidade, mas a rota principal pode fazer o mesmo)
 router.get('/hoje', verifyToken, async (req, res) => {
   try {
     const hoje = new Date().toISOString().split('T')[0];
@@ -138,4 +142,5 @@ router.delete('/:id', verifyToken, async (req, res) => {
 });
 
 export default router;
+
 
