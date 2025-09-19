@@ -77,7 +77,8 @@ router.get('/:id', verifyToken, async (req, res) => {
 // Criar novo agendamento
 router.post('/', async (req, res) => {
   try {
-    const { cliente_nome, servico, data, hora, status = 'Pendente', preco, observacoes, cliente_id } = req.body;
+    // O status padrão agora é 'Confirmado' se não for fornecido
+    const { cliente_nome, servico, data, hora, status = 'Confirmado', preco, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Cliente, serviço, data e hora são obrigatórios' });
@@ -142,3 +143,4 @@ router.delete('/:id', verifyToken, async (req, res) => {
 });
 
 export default router;
+
