@@ -77,6 +77,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 // Criar novo agendamento
 router.post('/', async (req, res) => {
   try {
+    // Agora, o status pode ser passado no corpo da requisição, caso contrário, será 'Pendente'
     const { cliente_nome, servico, data, hora, status = 'Pendente', preco, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
@@ -142,5 +143,3 @@ router.delete('/:id', verifyToken, async (req, res) => {
 });
 
 export default router;
-
-
