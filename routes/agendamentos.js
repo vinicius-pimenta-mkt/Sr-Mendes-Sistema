@@ -7,10 +7,15 @@ const router = express.Router();
 // Listar todos os agendamentos com filtros opcionais de data_inicio, data_fim e status
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const { data_inicio, data_fim, status } = req.query;
+    const { data, data_inicio, data_fim, status } = req.query;
     let queryText = 'SELECT * FROM agendamentos';
-    let params = [];
+    const params = [];
     const conditions = [];
+
+    if (data) {
+      conditions.push(' data = ?');
+      params.push(data);
+    }
 
     if (data_inicio && data_fim) {
       conditions.push(' data BETWEEN ? AND ?');
