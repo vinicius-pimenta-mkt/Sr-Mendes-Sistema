@@ -71,7 +71,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       SELECT 
         servico as service, 
         COUNT(*) as qty, 
-        SUM(COALESCE(preco, 0)) * 100 as revenue
+        SUM(COALESCE(preco, 0)) as revenue
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       GROUP BY servico 
@@ -203,7 +203,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         cliente_nome as name,
         COUNT(*) as visits,
         MAX(data) as last_visit,
-        SUM(COALESCE(preco, 0)) * 100 as spent
+        SUM(COALESCE(preco, 0)) as spent
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       GROUP BY cliente_nome 
