@@ -84,7 +84,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       return {
         service: servico.servico,
         qty: servicoVendido ? servicoVendido.qty : 0,
-        revenue: servicoVendido ? servicoVendido.revenue : 0
+        revenue: servicoVendido ? servicoVendido.revenue / 100 : 0
       };
     });
 
@@ -105,7 +105,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         
         dadosReceita.push({
           periodo: `${hora}h`,
-          valor: receitaHora[0]?.total || 0
+          valor: (receitaHora[0]?.total || 0) / 100
         });
       }
     } else if (periodo === 'semana') {
@@ -127,7 +127,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         
         dadosReceita.push({
           periodo: diasSemana[i],
-          valor: receitaDia[0]?.total || 0
+          valor: (receitaDia[0]?.total || 0) / 100
         });
       }
     } else if (periodo === 'mes') {
@@ -149,7 +149,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         
         dadosReceita.push({
           periodo: `Semana ${4 - semana}`,
-          valor: receitaSemana[0]?.total || 0
+          valor: (receitaSemana[0]?.total || 0) / 100
         });
       }
     } else if (periodo === 'ultimos15dias') {
@@ -167,7 +167,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         
         dadosReceita.push({
           periodo: dia.getDate().toString().padStart(2, '0') + '/' + (dia.getMonth() + 1).toString().padStart(2, '0'),
-          valor: receitaDia[0]?.total || 0
+          valor: (receitaDia[0]?.total || 0) / 100
         });
       }
     } else {
@@ -191,9 +191,9 @@ router.get('/resumo', verifyToken, async (req, res) => {
       `, [dataInicioStr, dataFimStr]);
 
       dadosReceita = [
-        { periodo: "Hoje", valor: receitaDiaria[0]?.total || 0 },
-        { periodo: "Semana", valor: receitaSemanal[0]?.total || 0 },
-        { periodo: "Mês", valor: receitaMensal[0]?.total || 0 }
+        { periodo: "Hoje", valor: (receitaDiaria[0]?.total || 0) / 100 },
+        { periodo: "Semana", valor: (receitaSemanal[0]?.total || 0) / 100 },
+        { periodo: "Mês", valor: (receitaMensal[0]?.total || 0) / 100 }
       ];
     }
 
@@ -203,7 +203,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         cliente_nome as name,
         COUNT(*) as visits,
         MAX(data) as last_visit,
-        SUM(COALESCE(preco, 0)) as spent
+        SUM(COALESCE(preco, 0)) / 100 as spent
       FROM agendamentos 
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       GROUP BY cliente_nome 
@@ -240,7 +240,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     res.json({
       atendimentosHoje: agendamentosHoje[0]?.total || 0,
-      receitaDia: receitaHoje[0]?.total || 0,
+      receitaDia: (receitaHoje[0]?.total || 0) / 100,
       proximosAgendamentos: proximosAgendamentos.length,
       servicosRealizados: servicosRealizados[0]?.total || 0,
       agendamentos: proximosAgendamentos,
@@ -272,7 +272,7 @@ router.get('/mensal', verifyToken, async (req, res) => {
     }
 
     const totalAgendamentos = await all(`SELECT COUNT(*) as total FROM agendamentos ${whereClause}`, params);
-    const receitaTotal = await all(`SELECT SUM(preco) as total FROM agendamentos ${whereClause} AND status = 'Confirmado'`, params);
+    const receitaTotal = await all(`SELECT SUM(preco) / 100 as total FROM agendamentos ${whereClause} AND status = 'Confirmado'`, params);
     const clientesAtivos = await all(`SELECT COUNT(DISTINCT cliente_nome) as total FROM agendamentos ${whereClause}`, params);
     const servicosMaisRealizados = await all(`
       SELECT servico as nome, COUNT(*) as quantidade 
@@ -284,7 +284,7 @@ router.get('/mensal', verifyToken, async (req, res) => {
 
     res.json({
       totalAgendamentos: totalAgendamentos[0]?.total || 0,
-      receitaTotal: receitaTotal[0]?.total || 0,
+      receitaTotal: (receitaTotal[0]?.total || 0),
       clientesAtivos: clientesAtivos[0]?.total || 0,
       servicosMaisRealizados: servicosMaisRealizados
     });
