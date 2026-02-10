@@ -1,6 +1,5 @@
 import express from 'express';
 import { all, get, query } from '../database/database.js';
-import { getServicePrice } from '../database/services.js'; // Importar a função de preço
 import { verifyToken } from './auth.js';
 
 const router = express.Router();
@@ -83,31 +82,21 @@ router.get('/:id', verifyToken, async (req, res) => {
 // Criar novo agendamento
 router.post('/', async (req, res) => {
   try {
-    let { cliente_nome, servico, data, hora, status = 'Confirmado', preco, observacoes, cliente_id, barber } = req.body;
-
-    // Se o preço não for fornecido, buscar da lista de serviços
-    if (!preco) {
-      preco = getServicePrice(servico);
-    }
-
-    // Converter preço para centavos se for um número e não estiver em centavos
-    if (typeof preco === 'number' && preco < 1000) { // Assumindo que preços menores que 1000 são em reais e precisam ser convertidos
-      preco = preco * 100;
-    }
+    // O status padrão agora é 'Confirmado' se não for fornecido
+    const { cliente_nome, servico, data, hora, status = 'Confirmado', preco, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Cliente, serviço, data e hora são obrigatórios' });
     }
 
     const result = await query(
-      'INSERT INTO agendamentos (cliente_id, cliente_nome, servico, data, hora, status, preco, observacoes, barber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [cliente_id, cliente_nome, servico, data, hora, status, preco, observacoes, barber]
+      'INSERT INTO agendamentos (cliente_id, cliente_nome, servico, data, hora, status, preco, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [cliente_id, cliente_nome, servico, data, hora, status, preco, observacoes]
     );
     
     res.status(201).json({
       id: result.lastID,
-      message: 'Agendamento criado com sucesso',
-      preco: preco / 100 // Retorna o preço em reais para o frontend
+      message: 'Agendamento criado com sucesso'
     });
   } catch (error) {
     console.error('Erro ao criar agendamento:', error);
@@ -119,15 +108,15 @@ router.post('/', async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { cliente_nome, servico, data, hora, status, preco, observacoes, barber } = req.body;
+    const { cliente_nome, servico, data, hora, status, preco, observacoes } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Cliente, serviço, data e hora são obrigatórios' });
     }
 
     const result = await query(
-      'UPDATE agendamentos SET cliente_nome = ?, servico = ?, data = ?, hora = ?, status = ?, preco = ?, observacoes = ?, barber = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [cliente_nome, servico, data, hora, status, preco, observacoes, barber, id]
+      'UPDATE agendamentos SET cliente_nome = ?, servico = ?, data = ?, hora = ?, status = ?, preco = ?, observacoes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [cliente_nome, servico, data, hora, status, preco, observacoes, id]
     );
     
     if (result.changes === 0) {
