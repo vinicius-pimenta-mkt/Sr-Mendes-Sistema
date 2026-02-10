@@ -47,6 +47,23 @@ export const initDatabase = async () => {
       )
     `);
 
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS agendamentos_yuri (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente_id INTEGER,
+        cliente_nome TEXT NOT NULL,
+        servico TEXT NOT NULL,
+        data TEXT NOT NULL,
+        hora TEXT NOT NULL,
+        status TEXT DEFAULT 'Pendente',
+        preco REAL,
+        observacoes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+      )
+    `);
+
     const adminUser = process.env.ADMIN_USER || 'adminmendes';
     const adminPass = process.env.ADMIN_PASS || 'mendesbarber01';
 
