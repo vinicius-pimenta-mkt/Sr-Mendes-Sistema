@@ -41,6 +41,7 @@ export const initDatabase = async () => {
         status TEXT DEFAULT 'Pendente',
         preco REAL,
         observacoes TEXT,
+        barber TEXT DEFAULT 'Mendes',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (cliente_id) REFERENCES clientes(id)
