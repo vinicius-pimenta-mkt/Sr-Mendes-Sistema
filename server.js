@@ -61,15 +61,13 @@ const startServer = async () => {
   }
 };
 
-// Para Vercel (serverless)
-if (process.env.NODE_ENV === 'production') {
+// Lógica de inicialização corrigida para Easypanel/Docker vs Vercel
+if (process.env.VERCEL) {
+  // Em ambiente serverless (Vercel), apenas inicializamos o banco
   initDatabase().catch(console.error);
-}
-
-// Para desenvolvimento local
-if (process.env.NODE_ENV !== 'production') {
+} else {
+  // Em ambientes de servidor (Docker, Easypanel, Local), iniciamos o servidor express
   startServer();
 }
 
 export default app;
-
