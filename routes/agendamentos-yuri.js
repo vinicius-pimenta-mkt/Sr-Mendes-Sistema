@@ -37,7 +37,7 @@ router.get('/', verifyToken, async (req, res) => {
       queryText += ' WHERE' + conditions.join(' AND');
     }
     
-    queryText += ' ORDER BY data, hora';
+    queryText += ' ORDER BY data DESC, hora DESC';
 
     const result = await all(queryText, params);
     res.json(result);
@@ -52,7 +52,7 @@ router.get('/hoje', verifyToken, async (req, res) => {
   try {
     const hoje = new Date().toISOString().split('T')[0];
     const result = await all(
-      'SELECT * FROM agendamentos_yuri WHERE data = ? ORDER BY hora',
+      'SELECT * FROM agendamentos_yuri WHERE data = ? ORDER BY hora DESC',
       [hoje]
     );
     res.json(result);
