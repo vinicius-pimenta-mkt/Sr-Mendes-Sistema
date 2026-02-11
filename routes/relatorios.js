@@ -79,17 +79,17 @@ router.get('/resumo', verifyToken, async (req, res) => {
       ORDER BY service, barber
     `, [dataInicioStr, dataFimStr]);
 
-    // Processar dados para o gráfico vertical (Lucas vs Turi)
+    // Processar dados para o gráfico vertical (Lucas vs Yuri)
     const servicosCompletos = todosServicos.map(servico => {
       const dadosLucas = servicosPorBarbeiro.find(s => s.service === servico.servico && (s.barber === 'Lucas' || s.barber === 'Mendes')) || { qty: 0, revenue: 0 };
-      const dadosTuri = servicosPorBarbeiro.find(s => s.service === servico.servico && s.barber === 'Turi') || { qty: 0, revenue: 0 };
+      const dadosYuri = servicosPorBarbeiro.find(s => s.service === servico.servico && (s.barber === 'Turi' || s.barber === 'Yuri')) || { qty: 0, revenue: 0 };
       
       return {
         service: servico.servico,
         lucas_qty: dadosLucas.qty,
-        turi_qty: dadosTuri.qty,
-        total_qty: dadosLucas.qty + dadosTuri.qty,
-        revenue: (dadosLucas.revenue + dadosTuri.revenue) / 100
+        yuri_qty: dadosYuri.qty,
+        total_qty: dadosLucas.qty + dadosYuri.qty,
+        revenue: (dadosLucas.revenue + dadosYuri.revenue) / 100
       };
     }).sort((a, b) => b.total_qty - a.total_qty);
 
@@ -202,6 +202,25 @@ router.get('/resumo', verifyToken, async (req, res) => {
       ];
     }
 
+    // Buscar todos os agendamentos do período para a lista de serviços na aba Receita
+    const agendamentosLucas = await all(`
+      SELECT cliente_nome, servico, data, hora, preco, "Lucas" as barber
+      FROM agendamentos
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+    `, [dataInicioStr, dataFimStr]);
+
+    const agendamentosYuri = await all(`
+      SELECT cliente_nome, servico, data, hora, preco, "Yuri" as barber
+      FROM agendamentos_yuri
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+    `, [dataInicioStr, dataFimStr]);
+
+    const todosAgendamentos = [...agendamentosLucas, ...agendamentosYuri].sort((a, b) => {
+      const dateA = new Date(`${a.data}T${a.hora}`);
+      const dateB = new Date(`${b.data}T${b.hora}`);
+      return dateB - dateA;
+    });
+
     // Buscar top clientes
     const topClientes = await all(`
       SELECT 
@@ -209,7 +228,11 @@ router.get('/resumo', verifyToken, async (req, res) => {
         COUNT(*) as visits,
         MAX(data) as last_visit,
         SUM(COALESCE(preco, 0)) / 100 as spent
-      FROM agendamentos 
+      FROM (
+        SELECT cliente_nome, data, preco, status FROM agendamentos
+        UNION ALL
+        SELECT cliente_nome, data, preco, status FROM agendamentos_yuri
+      )
       WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       GROUP BY cliente_nome 
       ORDER BY visits DESC, spent DESC
@@ -219,6 +242,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
     res.json({
       by_service: servicosCompletos || [],
       receita_detalhada: dadosReceita,
+      agendamentos: todosAgendamentos,
       totals: {
         daily: dadosReceita.find(d => d.periodo === 'Hoje')?.valor || 0,
         weekly: dadosReceita.find(d => d.periodo === 'Semana')?.valor || 0,
@@ -237,18 +261,32 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const hoje = new Date().toISOString().split('T')[0];
 
-    // Buscar dados do dashboard
-    const agendamentosHoje = await all('SELECT COUNT(*) as total FROM agendamentos WHERE data = ?', [hoje]);
-    const receitaHoje = await all('SELECT SUM(preco) as total FROM agendamentos WHERE data = ? AND status = ?', [hoje, 'Confirmado']);
-    const proximosAgendamentos = await all('SELECT * FROM agendamentos WHERE data >= ? ORDER BY data, hora LIMIT 5', [hoje]);
-    const servicosRealizados = await all('SELECT COUNT(*) as total FROM agendamentos WHERE data = ? AND status = ?', [hoje, 'Confirmado']);
+    // Buscar dados do dashboard (Lucas)
+    const agendamentosHojeLucas = await all('SELECT COUNT(*) as total FROM agendamentos WHERE data = ?', [hoje]);
+    const receitaHojeLucas = await all('SELECT SUM(preco) as total FROM agendamentos WHERE data = ? AND status = ?', [hoje, 'Confirmado']);
+    const proximosAgendamentosLucas = await all('SELECT *, "Lucas" as barber FROM agendamentos WHERE data >= ? ORDER BY data, hora LIMIT 5', [hoje]);
+    const servicosRealizadosLucas = await all('SELECT COUNT(*) as total FROM agendamentos WHERE data = ? AND status = ?', [hoje, 'Confirmado']);
+
+    // Buscar dados do dashboard (Yuri)
+    const agendamentosHojeYuri = await all('SELECT COUNT(*) as total FROM agendamentos_yuri WHERE data = ?', [hoje]);
+    const receitaHojeYuri = await all('SELECT SUM(preco) as total FROM agendamentos_yuri WHERE data = ? AND status = ?', [hoje, 'Confirmado']);
+    const proximosAgendamentosYuri = await all('SELECT *, "Yuri" as barber FROM agendamentos_yuri WHERE data >= ? ORDER BY data, hora LIMIT 5', [hoje]);
+    const servicosRealizadosYuri = await all('SELECT COUNT(*) as total FROM agendamentos_yuri WHERE data = ? AND status = ?', [hoje, 'Confirmado']);
+
+    const todosProximos = [...proximosAgendamentosLucas, ...proximosAgendamentosYuri]
+      .sort((a, b) => {
+        const dateA = new Date(`${a.data}T${a.hora}`);
+        const dateB = new Date(`${b.data}T${b.hora}`);
+        return dateA - dateB;
+      })
+      .slice(0, 10);
 
     res.json({
-      atendimentosHoje: agendamentosHoje[0]?.total || 0,
-      receitaDia: (receitaHoje[0]?.total || 0) / 100,
-      proximosAgendamentos: proximosAgendamentos.length,
-      servicosRealizados: servicosRealizados[0]?.total || 0,
-      agendamentos: proximosAgendamentos,
+      atendimentosHoje: (agendamentosHojeLucas[0]?.total || 0) + (agendamentosHojeYuri[0]?.total || 0),
+      receitaDia: ((receitaHojeLucas[0]?.total || 0) + (receitaHojeYuri[0]?.total || 0)) / 100,
+      proximosAgendamentos: todosProximos.length,
+      servicosRealizados: (servicosRealizadosLucas[0]?.total || 0) + (servicosRealizadosYuri[0]?.total || 0),
+      agendamentos: todosProximos,
       servicos: []
     });
   } catch (error) {
