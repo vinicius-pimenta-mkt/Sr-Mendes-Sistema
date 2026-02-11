@@ -59,34 +59,39 @@ router.get('/resumo', verifyToken, async (req, res) => {
     const dataInicioStr = dataInicio.toISOString().split('T')[0];
     const dataFimStr = dataFim.toISOString().split('T')[0];
 
-    // Lista de todos os serviços possíveis
+    // Lista de todos os serviços possíveis (baseado nos agendamentos existentes)
     const todosServicos = await all(`
       SELECT DISTINCT servico 
       FROM agendamentos 
       ORDER BY servico
     `);
 
-    // Buscar serviços mais vendidos no período
-    const servicosVendidos = await all(`
+    // Buscar serviços realizados por barbeiro no período
+    const servicosPorBarbeiro = await all(`
       SELECT 
         servico as service, 
+        barber,
         COUNT(*) as qty, 
         SUM(COALESCE(preco, 0)) as revenue
       FROM agendamentos 
-      WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
-      GROUP BY servico 
-      ORDER BY qty DESC
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+      GROUP BY servico, barber
+      ORDER BY service, barber
     `, [dataInicioStr, dataFimStr]);
 
-    // Criar array com todos os serviços, incluindo os com quantidade 0
+    // Processar dados para o gráfico vertical (Lucas vs Turi)
     const servicosCompletos = todosServicos.map(servico => {
-      const servicoVendido = servicosVendidos.find(s => s.service === servico.servico);
+      const dadosLucas = servicosPorBarbeiro.find(s => s.service === servico.servico && (s.barber === 'Lucas' || s.barber === 'Mendes')) || { qty: 0, revenue: 0 };
+      const dadosTuri = servicosPorBarbeiro.find(s => s.service === servico.servico && s.barber === 'Turi') || { qty: 0, revenue: 0 };
+      
       return {
         service: servico.servico,
-        qty: servicoVendido ? servicoVendido.qty : 0,
-        revenue: servicoVendido ? servicoVendido.revenue / 100 : 0
+        lucas_qty: dadosLucas.qty,
+        turi_qty: dadosTuri.qty,
+        total_qty: dadosLucas.qty + dadosTuri.qty,
+        revenue: (dadosLucas.revenue + dadosTuri.revenue) / 100
       };
-    });
+    }).sort((a, b) => b.total_qty - a.total_qty);
 
     // Dados de receita baseados no período
     let dadosReceita = [];
@@ -100,7 +105,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         const receitaHora = await all(`
           SELECT SUM(COALESCE(preco, 0)) as total 
           FROM agendamentos 
-          WHERE data = ? AND data <= date('now') AND hora >= ? AND hora < ? AND status = 'Confirmado'
+          WHERE data = ? AND hora >= ? AND hora < ? AND status = 'Confirmado'
         `, [dataInicioStr, horaStr, proximaHora]);
         
         dadosReceita.push({
@@ -122,7 +127,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         const receitaDia = await all(`
           SELECT SUM(COALESCE(preco, 0)) as total 
           FROM agendamentos 
-          WHERE data = ? AND data <= date('now') AND status = 'Confirmado'
+          WHERE data = ? AND status = 'Confirmado'
         `, [diaStr]);
         
         dadosReceita.push({
@@ -144,7 +149,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         const receitaSemana = await all(`
           SELECT SUM(COALESCE(preco, 0)) as total 
           FROM agendamentos 
-          WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
+          WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
         `, [inicioSemanaStr, fimSemanaStr]);
         
         dadosReceita.push({
@@ -162,7 +167,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         const receitaDia = await all(`
           SELECT SUM(COALESCE(preco, 0)) as total 
           FROM agendamentos 
-          WHERE data = ? AND data <= date('now') AND status = 'Confirmado'
+          WHERE data = ? AND status = 'Confirmado'
         `, [diaStr]);
         
         dadosReceita.push({
@@ -175,19 +180,19 @@ router.get('/resumo', verifyToken, async (req, res) => {
       const receitaDiaria = await all(`
         SELECT SUM(COALESCE(preco, 0)) as total 
         FROM agendamentos 
-        WHERE data = ? AND data <= date('now') AND status = 'Confirmado'
+        WHERE data = ? AND status = 'Confirmado'
       `, [hoje.toISOString().split('T')[0]]);
 
       const receitaSemanal = await all(`
         SELECT SUM(COALESCE(preco, 0)) as total 
         FROM agendamentos 
-        WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
+        WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       `, [new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], dataFimStr]);
 
       const receitaMensal = await all(`
         SELECT SUM(COALESCE(preco, 0)) as total 
         FROM agendamentos 
-        WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
+        WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       `, [dataInicioStr, dataFimStr]);
 
       dadosReceita = [
@@ -205,7 +210,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         MAX(data) as last_visit,
         SUM(COALESCE(preco, 0)) / 100 as spent
       FROM agendamentos 
-      WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
+      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
       GROUP BY cliente_nome 
       ORDER BY visits DESC, spent DESC
       LIMIT 10
@@ -248,144 +253,6 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Erro ao buscar dados do dashboard:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-// Relatório mensal
-router.get('/mensal', verifyToken, async (req, res) => {
-  try {
-    const { dataInicio, dataFim } = req.query;
-    
-    let whereClause = '';
-    let params = [];
-    
-    if (dataInicio && dataFim) {
-      whereClause = 'WHERE data BETWEEN ? AND ?';
-      params = [dataInicio, dataFim];
-    } else {
-      // Último mês por padrão
-      const hoje = new Date();
-      const umMesAtras = new Date(hoje.getFullYear(), hoje.getMonth() - 1, hoje.getDate());
-      whereClause = 'WHERE data BETWEEN ? AND ?';
-      params = [umMesAtras.toISOString().split('T')[0], hoje.toISOString().split('T')[0]];
-    }
-
-    const totalAgendamentos = await all(`SELECT COUNT(*) as total FROM agendamentos ${whereClause}`, params);
-    const receitaTotal = await all(`SELECT SUM(preco) / 100 as total FROM agendamentos ${whereClause} AND status = 'Confirmado'`, params);
-    const clientesAtivos = await all(`SELECT COUNT(DISTINCT cliente_nome) as total FROM agendamentos ${whereClause}`, params);
-    const servicosMaisRealizados = await all(`
-      SELECT servico as nome, COUNT(*) as quantidade 
-      FROM agendamentos ${whereClause} 
-      GROUP BY servico 
-      ORDER BY quantidade DESC 
-      LIMIT 5
-    `, params);
-
-    res.json({
-      totalAgendamentos: totalAgendamentos[0]?.total || 0,
-      receitaTotal: (receitaTotal[0]?.total || 0),
-      clientesAtivos: clientesAtivos[0]?.total || 0,
-      servicosMaisRealizados: servicosMaisRealizados
-    });
-  } catch (error) {
-    console.error('Erro ao gerar relatório mensal:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-// Exportar relatório CSV
-router.get('/exportar', verifyToken, async (req, res) => {
-  try {
-    const { dataInicio, dataFim } = req.query;
-    
-    let whereClause = '';
-    let params = [];
-    
-    if (dataInicio && dataFim) {
-      whereClause = 'WHERE data BETWEEN ? AND ?';
-      params = [dataInicio, dataFim];
-    }
-
-    const agendamentos = await all(`
-      SELECT 
-        data, 
-        hora, 
-        cliente_nome, 
-        servico, 
-        status, 
-        preco,
-        observacoes
-      FROM agendamentos 
-      ${whereClause}
-      ORDER BY data, hora
-    `, params);
-
-    // Gerar CSV
-    let csv = 'Data,Hora,Cliente,Serviço,Status,Preço,Observações\n';
-    agendamentos.forEach(agendamento => {
-      csv += `${agendamento.data},${agendamento.hora},"${agendamento.cliente_nome}","${agendamento.servico}",${agendamento.status},${agendamento.preco || 0},"${agendamento.observacoes || ''}"\n`;
-    });
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="relatorio_barbearia.csv"');
-    res.send(csv);
-  } catch (error) {
-    console.error('Erro ao exportar relatório:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-// Webhook para N8N - IMPORTANTE: Endpoint para integração
-router.post('/n8n', async (req, res) => {
-  try {
-    const { tipo, cliente, telefone, servico, data, hora } = req.body;
-
-    console.log('Webhook N8N recebido:', req.body);
-
-    if (tipo === 'novo_agendamento') {
-      if (!cliente || !servico || !data || !hora) {
-        return res.status(400).json({ error: 'Dados incompletos para agendamento' });
-      }
-
-      // Verificar se já existe um cliente com esse nome
-      let clienteId = null;
-      const clienteExistente = await get('SELECT id FROM clientes WHERE nome = ?', [cliente]);
-      
-      if (!clienteExistente && telefone) {
-        // Criar novo cliente se não existir
-        const novoCliente = await query(
-          'INSERT INTO clientes (nome, telefone) VALUES (?, ?)',
-          [cliente, telefone]
-        );
-        clienteId = novoCliente.lastID;
-      } else if (clienteExistente) {
-        clienteId = clienteExistente.id;
-      }
-
-      // Criar agendamento
-      const result = await query(
-        'INSERT INTO agendamentos (cliente_id, cliente_nome, servico, data, hora, status) VALUES (?, ?, ?, ?, ?, ?)',
-        [clienteId, cliente, servico, data, hora, 'Pendente']
-      );
-      
-      res.json({
-        id: result.lastID,
-        message: 'Agendamento criado com sucesso via N8N',
-        agendamento: {
-          id: result.lastID,
-          cliente_nome: cliente,
-          servico,
-          data,
-          hora,
-          status: 'Pendente'
-        }
-      });
-    } else {
-      res.status(400).json({ error: 'Tipo de operação não suportado' });
-    }
-  } catch (error) {
-    console.error('Erro ao processar webhook N8N:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
