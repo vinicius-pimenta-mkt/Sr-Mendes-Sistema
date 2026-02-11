@@ -73,7 +73,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         COUNT(*) as qty, 
         SUM(COALESCE(preco, 0)) as revenue
       FROM agendamentos_yuri 
-      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+      WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
       GROUP BY servico 
       ORDER BY qty DESC
     `, [dataInicioStr, dataFimStr]);
@@ -100,7 +100,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         const receitaHora = await all(`
           SELECT SUM(COALESCE(preco, 0)) as total 
           FROM agendamentos_yuri 
-          WHERE data = ? AND hora >= ? AND hora < ? AND status = 'Confirmado'
+          WHERE data = ? AND data <= date('now') AND hora >= ? AND hora < ? AND status = 'Confirmado'
         `, [dataInicioStr, horaStr, proximaHora]);
         
         dadosReceita.push({
@@ -122,7 +122,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         const receitaDia = await all(`
           SELECT SUM(COALESCE(preco, 0)) as total 
           FROM agendamentos_yuri 
-          WHERE data = ? AND status = 'Confirmado'
+          WHERE data = ? AND data <= date('now') AND status = 'Confirmado'
         `, [diaStr]);
         
         dadosReceita.push({
@@ -144,7 +144,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         const receitaSemana = await all(`
           SELECT SUM(COALESCE(preco, 0)) as total 
           FROM agendamentos_yuri 
-          WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+          WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
         `, [inicioSemanaStr, fimSemanaStr]);
         
         dadosReceita.push({
@@ -162,7 +162,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         const receitaDia = await all(`
           SELECT SUM(COALESCE(preco, 0)) as total 
           FROM agendamentos_yuri 
-          WHERE data = ? AND status = 'Confirmado'
+          WHERE data = ? AND data <= date('now') AND status = 'Confirmado'
         `, [diaStr]);
         
         dadosReceita.push({
@@ -175,19 +175,19 @@ router.get('/resumo', verifyToken, async (req, res) => {
       const receitaDiaria = await all(`
         SELECT SUM(COALESCE(preco, 0)) as total 
         FROM agendamentos_yuri 
-        WHERE data = ? AND status = 'Confirmado'
+        WHERE data = ? AND data <= date('now') AND status = 'Confirmado'
       `, [hoje.toISOString().split('T')[0]]);
 
       const receitaSemanal = await all(`
         SELECT SUM(COALESCE(preco, 0)) as total 
         FROM agendamentos_yuri 
-        WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+        WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
       `, [new Date(hoje.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], dataFimStr]);
 
       const receitaMensal = await all(`
         SELECT SUM(COALESCE(preco, 0)) as total 
         FROM agendamentos_yuri 
-        WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+        WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
       `, [dataInicioStr, dataFimStr]);
 
       dadosReceita = [
@@ -205,7 +205,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
         MAX(data) as last_visit,
         SUM(COALESCE(preco, 0)) / 100 as spent
       FROM agendamentos_yuri 
-      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+      WHERE data BETWEEN ? AND ? AND data <= date('now') AND status = 'Confirmado'
       GROUP BY cliente_nome 
       ORDER BY visits DESC, spent DESC
       LIMIT 10
