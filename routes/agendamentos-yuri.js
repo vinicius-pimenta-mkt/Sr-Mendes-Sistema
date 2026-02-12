@@ -4,7 +4,7 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
-// Listar todos os agendamentos do Yuri com filtros opcionais de data_inicio, data_fim e status
+// Listar todos os agendamentos do Yuri
 router.get('/', verifyToken, async (req, res) => {
   try {
     const { data, data_inicio, data_fim, status } = req.query;
@@ -47,43 +47,10 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// Agendamentos de hoje do Yuri
-router.get('/hoje', verifyToken, async (req, res) => {
-  try {
-    const hoje = new Date().toISOString().split('T')[0];
-    const result = await all(
-      'SELECT * FROM agendamentos_yuri WHERE data = ? ORDER BY hora DESC',
-      [hoje]
-    );
-    res.json(result);
-  } catch (error) {
-    console.error('Erro ao buscar agendamentos de hoje do Yuri:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-// Buscar agendamento do Yuri por ID
-router.get('/:id', verifyToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await get('SELECT * FROM agendamentos_yuri WHERE id = ?', [id]);
-    
-    if (!result) {
-      return res.status(404).json({ error: 'Agendamento não encontrado' });
-    }
-    
-    res.json(result);
-  } catch (error) {
-    console.error('Erro ao buscar agendamento do Yuri:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
 // Criar novo agendamento para o Yuri
 router.post('/', async (req, res) => {
   try {
-    // O status padrão agora é 'Confirmado' se não for fornecido
-    const { cliente_nome, servico, data, hora, status = 'Confirmado', preco, observacoes, cliente_id } = req.body;
+    const { cliente_nome, servico, data, hora, status = 'Pendente', preco, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Cliente, serviço, data e hora são obrigatórios' });
@@ -109,10 +76,6 @@ router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { cliente_nome, servico, data, hora, status, preco, observacoes } = req.body;
-
-    if (!cliente_nome || !servico || !data || !hora) {
-      return res.status(400).json({ error: 'Cliente, serviço, data e hora são obrigatórios' });
-    }
 
     const result = await query(
       'UPDATE agendamentos_yuri SET cliente_nome = ?, servico = ?, data = ?, hora = ?, status = ?, preco = ?, observacoes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
