@@ -1,15 +1,25 @@
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 let db;
 
 export const initDatabase = async () => {
   try {
+    const dbPath = path.join(__dirname, 'barbearia.db');
+    console.log('Caminho do banco de dados:', dbPath);
+    
     db = await open({
-      filename: './database/barbearia.db',
+      filename: dbPath,
       driver: sqlite3.Database
     });
 
+    // Tabela de usuários
     await db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -19,6 +29,7 @@ export const initDatabase = async () => {
       )
     `);
 
+    // Tabela de clientes
     await db.exec(`
       CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,6 +41,7 @@ export const initDatabase = async () => {
       )
     `);
 
+    // Tabela de agendamentos - Lucas
     await db.exec(`
       CREATE TABLE IF NOT EXISTS agendamentos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +59,7 @@ export const initDatabase = async () => {
       )
     `);
 
+    // Tabela de agendamentos - Yuri
     await db.exec(`
       CREATE TABLE IF NOT EXISTS agendamentos_yuri (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +77,7 @@ export const initDatabase = async () => {
       )
     `);
 
+    // Inserir usuário admin padrão se não existir
     const adminUser = process.env.ADMIN_USER || 'adminmendes';
     const adminPass = process.env.ADMIN_PASS || 'mendesbarber01';
 
@@ -80,31 +94,25 @@ export const initDatabase = async () => {
   }
 };
 
-export const query = async (sql, params) => {
+export const query = async (sql, params = []) => {
   if (!db) {
     throw new Error('Database not initialized. Call initDatabase() first.');
   }
-  const stmt = await db.prepare(sql);
-  const result = await stmt.run(...params);
-  stmt.finalize();
-  return result;
+  return await db.run(sql, params);
 };
 
-export const get = async (sql, params) => {
+export const get = async (sql, params = []) => {
   if (!db) {
     throw new Error('Database not initialized. Call initDatabase() first.');
   }
-  const result = await db.get(sql, params);
-  return result;
+  return await db.get(sql, params);
 };
 
-export const all = async (sql, params) => {
+export const all = async (sql, params = []) => {
   if (!db) {
     throw new Error('Database not initialized. Call initDatabase() first.');
   }
-  const result = await db.all(sql, params);
-  return result;
+  return await db.all(sql, params);
 };
 
 export default db;
-
