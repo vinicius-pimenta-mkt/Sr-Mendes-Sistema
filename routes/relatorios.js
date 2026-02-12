@@ -1,5 +1,5 @@
 import express from 'express';
-import { all, get, query } from '../database/database.js';
+import { all, get } from '../database/database.js';
 import { verifyToken } from './auth.js';
 
 const router = express.Router();
@@ -7,34 +7,30 @@ const router = express.Router();
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
     const { periodo = 'mes', data_inicio, data_fim, barber = 'Geral' } = req.query;
-    let dataInicio, dataFim;
+    let dIni, dFim;
     const hoje = new Date();
     
     if (data_inicio && data_fim) {
-      dataInicio = new Date(data_inicio);
-      dataFim = new Date(data_fim);
+      dIni = data_inicio;
+      dFim = data_fim;
     } else {
+      let dataInicio;
       switch (periodo) {
-        case 'hoje': dataInicio = hoje; dataFim = hoje; break;
+        case 'hoje': dataInicio = hoje; break;
         case 'ontem': 
-          const ontem = new Date(); ontem.setDate(hoje.getDate() - 1);
-          dataInicio = ontem; dataFim = ontem; break;
+          dataInicio = new Date(); dataInicio.setDate(hoje.getDate() - 1); break;
         case 'semana': 
-          const semana = new Date(); semana.setDate(hoje.getDate() - 7);
-          dataInicio = semana; dataFim = hoje; break;
+          dataInicio = new Date(); dataInicio.setDate(hoje.getDate() - 7); break;
         case 'ano': 
-          const ano = new Date(); ano.setFullYear(hoje.getFullYear() - 1);
-          dataInicio = ano; dataFim = hoje; break;
+          dataInicio = new Date(); dataInicio.setFullYear(hoje.getFullYear() - 1); break;
         default: // mes
-          const mes = new Date(); mes.setMonth(hoje.getMonth() - 1);
-          dataInicio = mes; dataFim = hoje;
+          dataInicio = new Date(); dataInicio.setMonth(hoje.getMonth() - 1);
       }
+      dIni = dataInicio.toISOString().split('T')[0];
+      dFim = hoje.toISOString().split('T')[0];
     }
     
-    const dIni = dataInicio.toISOString().split('T')[0];
-    const dFim = dataFim.toISOString().split('T')[0];
-
-    // 1. Serviços por Barbeiro (Filtro Aplicado)
+    // 1. Serviços por Barbeiro
     let rawServices = [];
     if (barber === 'Geral' || barber === 'Lucas') {
       const sLucas = await all(`
@@ -104,8 +100,8 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
     res.json({ by_service: byService, receita_detalhada: receitaDet, agendamentos, top_clients: topClients });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Erro interno' });
+    console.error('Erro em /resumo:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
@@ -114,13 +110,16 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const hoje = new Date().toISOString().split('T')[0];
     const agoraHora = new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // Buscar agendamentos que ainda não aconteceram hoje ou em datas futuras
+    // Buscar agendamentos que ainda não aconteceram hoje (hora >= agora) ou em datas futuras
+    // Importante: A comparação de strings para data (YYYY-MM-DD) e hora (HH:mm) funciona no SQLite
     const data = await all(`
       SELECT * FROM (
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos WHERE (data > ?) OR (data = ? AND hora >= ?)
+        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
+        WHERE status != 'Cancelado' AND ((data > ?) OR (data = ? AND hora >= ?))
         UNION ALL
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri WHERE (data > ?) OR (data = ? AND hora >= ?)
-      ) ORDER BY data, hora LIMIT 10
+        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
+        WHERE status != 'Cancelado' AND ((data > ?) OR (data = ? AND hora >= ?))
+      ) ORDER BY data ASC, hora ASC LIMIT 10
     `, [hoje, hoje, agoraHora, hoje, hoje, agoraHora]);
 
     const stats = await get(`
@@ -142,7 +141,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       agendamentos: data
     });
   } catch (error) {
-    res.status(500).json({ error: 'Erro dashboard' });
+    console.error('Erro em /dashboard:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
 
