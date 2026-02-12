@@ -5,6 +5,23 @@ import { get } from '../database/database.js';
 
 const router = express.Router();
 
+// Middleware para verificar token
+export const verifyToken = (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Token não fornecido' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || '019283');
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+};
+
 // Login
 router.post('/login', async (req, res) => {
   try {
@@ -47,22 +64,23 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Middleware para verificar token
-export const verifyToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'Token não fornecido' });
-  }
-
+// Rota para obter dados do usuário autenticado
+router.get('/me', verifyToken, async (req, res) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || '019283');
-    req.user = decoded;
-    next();
+    const user = await get('SELECT id, username FROM users WHERE id = ?', [req.user.id]);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'Usuário não encontrado' });
+    }
+    
+    res.json({
+      id: user.id,
+      username: user.username
+    });
   } catch (error) {
-    return res.status(401).json({ error: 'Token inválido' });
+    console.error('Erro ao buscar usuário:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
   }
-};
+});
 
 export default router;
-
