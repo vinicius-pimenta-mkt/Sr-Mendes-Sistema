@@ -1,6 +1,5 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
 import { get } from '../database/database.js';
 
 const router = express.Router();
@@ -31,19 +30,12 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username e password são obrigatórios' });
     }
 
-    // Buscar usuário no banco
     const user = await get('SELECT * FROM users WHERE username = ?', [username]);
     
-    if (!user) {
+    if (!user || password !== user.password) {
       return res.status(401).json({ error: 'Credenciais inválidas' });
     }
 
-    // Verificar senha (comparação direta por enquanto, pode ser melhorada com hash)
-    if (password !== user.password) {
-      return res.status(401).json({ error: 'Credenciais inválidas' });
-    }
-
-    // Gerar token JWT
     const token = jwt.sign(
       { id: user.id, username: user.username },
       process.env.JWT_SECRET || '019283',
@@ -53,10 +45,7 @@ router.post('/login', async (req, res) => {
     res.json({
       message: 'Login realizado com sucesso',
       token,
-      user: {
-        id: user.id,
-        username: user.username
-      }
+      user: { id: user.id, username: user.username }
     });
   } catch (error) {
     console.error('Erro no login:', error);
@@ -73,12 +62,9 @@ router.get('/me', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
     
-    res.json({
-      id: user.id,
-      username: user.username
-    });
+    res.json(user);
   } catch (error) {
-    console.error('Erro ao buscar usuário:', error);
+    console.error('Erro em /me:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
   }
 });
