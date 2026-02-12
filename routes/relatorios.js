@@ -67,14 +67,18 @@ router.get('/resumo', verifyToken, async (req, res) => {
     // 2. Evolução da Receita
     let revenueQuery = "";
     if (barber === 'Geral') {
-      revenueQuery = `SELECT data, SUM(preco) as total FROM (SELECT data, preco, status FROM agendamentos UNION ALL SELECT data, preco, status FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
+      revenueQuery = `SELECT data, SUM(COALESCE(preco, 0)) as total FROM (SELECT data, preco, status FROM agendamentos UNION ALL SELECT data, preco, status FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
     } else if (barber === 'Lucas') {
-      revenueQuery = `SELECT data, SUM(preco) as total FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
+      revenueQuery = `SELECT data, SUM(COALESCE(preco, 0)) as total FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
     } else {
-      revenueQuery = `SELECT data, SUM(preco) as total FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
+      revenueQuery = `SELECT data, SUM(COALESCE(preco, 0)) as total FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
     }
     const rawRevenue = await all(revenueQuery, [dIni, dFim]);
-    const receitaDet = rawRevenue.map(r => ({ periodo: r.data.split('-').reverse().slice(0, 2).join('/'), valor: (r.total || 0) / 100 }));
+    const receitaDet = rawRevenue.map(r => ({ 
+      periodo: r.data.split('-').reverse().join('/'), 
+      valor: (r.total || 0) / 100,
+      data_original: r.data
+    }));
 
     // 3. Lista de Agendamentos
     let listQuery = "";
@@ -90,11 +94,11 @@ router.get('/resumo', verifyToken, async (req, res) => {
     // 4. Top Clientes
     let clientsQuery = "";
     if (barber === 'Geral') {
-      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(preco) / 100 as spent FROM (SELECT cliente_nome, preco, status, data FROM agendamentos UNION ALL SELECT cliente_nome, preco, status, data FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
+      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM (SELECT cliente_nome, preco, status, data FROM agendamentos UNION ALL SELECT cliente_nome, preco, status, data FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
     } else if (barber === 'Lucas') {
-      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(preco) / 100 as spent FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
+      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
     } else {
-      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(preco) / 100 as spent FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
+      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
     }
     const topClients = await all(clientsQuery, [dIni, dFim]);
 
@@ -110,22 +114,21 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const hoje = new Date().toISOString().split('T')[0];
     const agoraHora = new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // Buscar agendamentos que ainda não aconteceram hoje (hora >= agora) ou em datas futuras
-    // Importante: A comparação de strings para data (YYYY-MM-DD) e hora (HH:mm) funciona no SQLite
+    // Buscar agendamentos que ainda não aconteceram HOJE (apenas hoje, conforme solicitado)
     const data = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
-        WHERE status != 'Cancelado' AND ((data > ?) OR (data = ? AND hora >= ?))
+        WHERE status != 'Cancelado' AND data = ? AND hora >= ?
         UNION ALL
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
-        WHERE status != 'Cancelado' AND ((data > ?) OR (data = ? AND hora >= ?))
-      ) ORDER BY data ASC, hora ASC LIMIT 10
-    `, [hoje, hoje, agoraHora, hoje, hoje, agoraHora]);
+        WHERE status != 'Cancelado' AND data = ? AND hora >= ?
+      ) ORDER BY hora ASC
+    `, [hoje, agoraHora, hoje, agoraHora]);
 
     const stats = await get(`
       SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'Confirmado' THEN preco ELSE 0 END) as revenue,
+        SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
         SUM(CASE WHEN status = 'Confirmado' THEN 1 ELSE 0 END) as confirmed
       FROM (
         SELECT status, preco, data FROM agendamentos WHERE data = ?
