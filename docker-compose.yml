@@ -7,8 +7,8 @@ services:
       - "3001:3000"
     environment:
       JWT_SECRET: "sua_chave_secreta"
-      ADMIN_USER: "adminmendes"
-      ADMIN_PASS: "mendesbarber01"
+      ADMIN_USER: "adminbm"
+      ADMIN_PASS: "belmasc2026"
       DATABASE_URL: "sqlite:///app/database.sqlite"
     volumes:
       - ./database.sqlite:/app/database.sqlite
@@ -17,3 +17,4 @@ services:
       - "traefik.http.routers.srmendes.rule=Host(`api.unvgroup.tech`)"
       - "traefik.http.routers.srmendes.entrypoints=websecure"
       - "traefik.http.routers.srmendes.tls.certresolver=myresolver"
+
