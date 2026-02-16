@@ -76,8 +76,8 @@ const initDatabase = () => {
           }
 
           // Inserir usuário admin padrão
-          const adminUser = process.env.ADMIN_USER || 'adminmendes';
-          const adminPass = process.env.ADMIN_PASS || 'mendesbarber01';
+          const adminUser = process.env.ADMIN_USER || 'adminbm';
+          const adminPass = process.env.ADMIN_PASS || 'belmasc2026';
           
           db.run(`
             INSERT OR IGNORE INTO users (username, password) 
