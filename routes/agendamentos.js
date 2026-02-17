@@ -47,51 +47,18 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// Agendamentos de hoje (mantido para compatibilidade, mas a rota principal pode fazer o mesmo)
-router.get('/hoje', verifyToken, async (req, res) => {
-  try {
-    const hoje = new Date().toISOString().split('T')[0];
-    const result = await all(
-      'SELECT * FROM agendamentos WHERE data = ? ORDER BY hora DESC',
-      [hoje]
-    );
-    res.json(result);
-  } catch (error) {
-    console.error('Erro ao buscar agendamentos de hoje:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-// Buscar agendamento por ID
-router.get('/:id', verifyToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await get('SELECT * FROM agendamentos WHERE id = ?', [id]);
-    
-    if (!result) {
-      return res.status(404).json({ error: 'Agendamento não encontrado' });
-    }
-    
-    res.json(result);
-  } catch (error) {
-    console.error('Erro ao buscar agendamento:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
 // Criar novo agendamento
 router.post('/', async (req, res) => {
   try {
-    // O status padrão agora é 'Confirmado' se não for fornecido
-    const { cliente_nome, servico, data, hora, status = 'Confirmado', preco, observacoes, cliente_id } = req.body;
+    const { cliente_nome, servico, data, hora, status = 'Confirmado', preco, forma_pagamento, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Cliente, serviço, data e hora são obrigatórios' });
     }
 
     const result = await query(
-      'INSERT INTO agendamentos (cliente_id, cliente_nome, servico, data, hora, status, preco, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [cliente_id, cliente_nome, servico, data, hora, status, preco, observacoes]
+      'INSERT INTO agendamentos (cliente_id, cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [cliente_id, cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes]
     );
     
     res.status(201).json({
@@ -108,15 +75,11 @@ router.post('/', async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { cliente_nome, servico, data, hora, status, preco, observacoes } = req.body;
-
-    if (!cliente_nome || !servico || !data || !hora) {
-      return res.status(400).json({ error: 'Cliente, serviço, data e hora são obrigatórios' });
-    }
+    const { cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
 
     const result = await query(
-      'UPDATE agendamentos SET cliente_nome = ?, servico = ?, data = ?, hora = ?, status = ?, preco = ?, observacoes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [cliente_nome, servico, data, hora, status, preco, observacoes, id]
+      'UPDATE agendamentos SET cliente_nome = ?, servico = ?, data = ?, hora = ?, status = ?, preco = ?, forma_pagamento = ?, observacoes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes, id]
     );
     
     if (result.changes === 0) {
