@@ -50,15 +50,15 @@ router.get('/', verifyToken, async (req, res) => {
 // Criar novo agendamento para o Yuri
 router.post('/', async (req, res) => {
   try {
-    const { cliente_nome, servico, data, hora, status = 'Pendente', preco, observacoes, cliente_id } = req.body;
+    const { cliente_nome, servico, data, hora, status = 'Pendente', preco, forma_pagamento, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Cliente, serviço, data e hora são obrigatórios' });
     }
 
     const result = await query(
-      'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, servico, data, hora, status, preco, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [cliente_id, cliente_nome, servico, data, hora, status, preco, observacoes]
+      'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [cliente_id, cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes]
     );
     
     res.status(201).json({
@@ -75,11 +75,11 @@ router.post('/', async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { cliente_nome, servico, data, hora, status, preco, observacoes } = req.body;
+    const { cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
 
     const result = await query(
-      'UPDATE agendamentos_yuri SET cliente_nome = ?, servico = ?, data = ?, hora = ?, status = ?, preco = ?, observacoes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [cliente_nome, servico, data, hora, status, preco, observacoes, id]
+      'UPDATE agendamentos_yuri SET cliente_nome = ?, servico = ?, data = ?, hora = ?, status = ?, preco = ?, forma_pagamento = ?, observacoes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes, id]
     );
     
     if (result.changes === 0) {
