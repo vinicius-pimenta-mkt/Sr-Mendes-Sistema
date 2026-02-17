@@ -41,7 +41,7 @@ export const initDatabase = async () => {
       )
     `);
 
-    // Tabela de agendamentos - Lucas
+    // Tabela de agendamentos - Lucas (Adicionada coluna forma_pagamento)
     await db.exec(`
       CREATE TABLE IF NOT EXISTS agendamentos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +52,7 @@ export const initDatabase = async () => {
         hora TEXT NOT NULL,
         status TEXT DEFAULT 'Pendente',
         preco REAL,
+        forma_pagamento TEXT,
         observacoes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -59,7 +60,7 @@ export const initDatabase = async () => {
       )
     `);
 
-    // Tabela de agendamentos - Yuri
+    // Tabela de agendamentos - Yuri (Adicionada coluna forma_pagamento)
     await db.exec(`
       CREATE TABLE IF NOT EXISTS agendamentos_yuri (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +71,7 @@ export const initDatabase = async () => {
         hora TEXT NOT NULL,
         status TEXT DEFAULT 'Pendente',
         preco REAL,
+        forma_pagamento TEXT,
         observacoes TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -77,9 +79,20 @@ export const initDatabase = async () => {
       )
     `);
 
+    // Migração: Adicionar coluna forma_pagamento se não existir (para bancos já criados)
+    try {
+      await db.exec("ALTER TABLE agendamentos ADD COLUMN forma_pagamento TEXT");
+      console.log("Migração: Coluna forma_pagamento adicionada em agendamentos.");
+    } catch (e) { /* Coluna já existe */ }
+
+    try {
+      await db.exec("ALTER TABLE agendamentos_yuri ADD COLUMN forma_pagamento TEXT");
+      console.log("Migração: Coluna forma_pagamento adicionada em agendamentos_yuri.");
+    } catch (e) { /* Coluna já existe */ }
+
     // Inserir usuário admin padrão se não existir
-    const adminUser = process.env.ADMIN_USER || 'adminbm';
-    const adminPass = process.env.ADMIN_PASS || 'belmasc2026';
+    const adminUser = process.env.ADMIN_USER || 'adminmendes';
+    const adminPass = process.env.ADMIN_PASS || 'mendesbarber01';
 
     const existingUser = await db.get('SELECT * FROM users WHERE username = ?', adminUser);
     if (!existingUser) {
