@@ -80,18 +80,34 @@ router.get('/resumo', verifyToken, async (req, res) => {
       data_original: r.data
     }));
 
-    // 3. Lista de Agendamentos
+    // 3. Receita por Meio de Pagamento
+    let paymentsQuery = "";
+    if (barber === 'Geral') {
+      paymentsQuery = `SELECT forma_pagamento, SUM(COALESCE(preco, 0)) as total, COUNT(*) as qty FROM (SELECT forma_pagamento, preco, status, data FROM agendamentos UNION ALL SELECT forma_pagamento, preco, status, data FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY forma_pagamento`;
+    } else if (barber === 'Lucas') {
+      paymentsQuery = `SELECT forma_pagamento, SUM(COALESCE(preco, 0)) as total, COUNT(*) as qty FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY forma_pagamento`;
+    } else {
+      paymentsQuery = `SELECT forma_pagamento, SUM(COALESCE(preco, 0)) as total, COUNT(*) as qty FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY forma_pagamento`;
+    }
+    const rawPayments = await all(paymentsQuery, [dIni, dFim]);
+    const byPayment = rawPayments.map(p => ({
+      forma: p.forma_pagamento || 'Não informado',
+      valor: (p.total || 0) / 100,
+      quantidade: p.qty
+    }));
+
+    // 4. Lista de Agendamentos
     let listQuery = "";
     if (barber === 'Geral') {
-      listQuery = `SELECT cliente_nome, servico, data, hora, preco, barber FROM (SELECT cliente_nome, servico, data, hora, preco, 'Lucas' as barber, status FROM agendamentos UNION ALL SELECT cliente_nome, servico, data, hora, preco, 'Yuri' as barber, status FROM agendamentos_yuri) WHERE data BETWEEN ? AND ? AND status = 'Confirmado' ORDER BY data DESC, hora DESC`;
+      listQuery = `SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, barber FROM (SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, 'Lucas' as barber, status FROM agendamentos UNION ALL SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, 'Yuri' as barber, status FROM agendamentos_yuri) WHERE data BETWEEN ? AND ? AND status = 'Confirmado' ORDER BY data DESC, hora DESC`;
     } else if (barber === 'Lucas') {
-      listQuery = `SELECT cliente_nome, servico, data, hora, preco, 'Lucas' as barber FROM agendamentos WHERE data BETWEEN ? AND ? AND status = 'Confirmado' ORDER BY data DESC, hora DESC`;
+      listQuery = `SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, 'Lucas' as barber FROM agendamentos WHERE data BETWEEN ? AND ? AND status = 'Confirmado' ORDER BY data DESC, hora DESC`;
     } else {
-      listQuery = `SELECT cliente_nome, servico, data, hora, preco, 'Yuri' as barber FROM agendamentos_yuri WHERE data BETWEEN ? AND ? AND status = 'Confirmado' ORDER BY data DESC, hora DESC`;
+      listQuery = `SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, 'Yuri' as barber FROM agendamentos_yuri WHERE data BETWEEN ? AND ? AND status = 'Confirmado' ORDER BY data DESC, hora DESC`;
     }
     const agendamentos = await all(listQuery, [dIni, dFim]);
 
-    // 4. Top Clientes
+    // 5. Top Clientes
     let clientsQuery = "";
     if (barber === 'Geral') {
       clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM (SELECT cliente_nome, preco, status, data FROM agendamentos UNION ALL SELECT cliente_nome, preco, status, data FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
@@ -102,7 +118,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
     }
     const topClients = await all(clientsQuery, [dIni, dFim]);
 
-    res.json({ by_service: byService, receita_detalhada: receitaDet, agendamentos, top_clients: topClients });
+    res.json({ by_service: byService, receita_detalhada: receitaDet, by_payment: byPayment, agendamentos, top_clients: topClients });
   } catch (error) {
     console.error('Erro em /resumo:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
@@ -114,34 +130,36 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const hoje = new Date().toISOString().split('T')[0];
     const agoraHora = new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // Buscar agendamentos que ainda não aconteceram HOJE (apenas hoje, conforme solicitado)
+    // Todos os agendamentos de hoje (para filtrar no frontend por horário)
     const data = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
-        WHERE status != 'Cancelado' AND data = ? AND hora >= ?
+        WHERE status != 'Cancelado' AND data = ?
         UNION ALL
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
-        WHERE status != 'Cancelado' AND data = ? AND hora >= ?
+        WHERE status != 'Cancelado' AND data = ?
       ) ORDER BY hora ASC
-    `, [hoje, agoraHora, hoje, agoraHora]);
+    `, [hoje, hoje]);
 
+    // Estatísticas (somente o que já passou do horário ou está confirmado)
     const stats = await get(`
       SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
-        SUM(CASE WHEN status = 'Confirmado' THEN 1 ELSE 0 END) as confirmed
+        SUM(CASE WHEN status = 'Confirmado' OR (status = 'Pendente' AND hora < ?) THEN 1 ELSE 0 END) as realized
       FROM (
-        SELECT status, preco, data FROM agendamentos WHERE data = ?
+        SELECT status, preco, data, hora FROM agendamentos WHERE data = ?
         UNION ALL
-        SELECT status, preco, data FROM agendamentos_yuri WHERE data = ?
+        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ?
       )
-    `, [hoje, hoje]);
+    `, [agoraHora, hoje, hoje]);
 
     res.json({
       atendimentosHoje: stats.total || 0,
       receitaDia: (stats.revenue || 0) / 100,
-      servicosRealizados: stats.confirmed || 0,
-      agendamentos: data
+      servicosRealizados: stats.realized || 0,
+      agendamentos: data,
+      agoraHora
     });
   } catch (error) {
     console.error('Erro em /dashboard:', error);
