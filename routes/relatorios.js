@@ -130,7 +130,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const hoje = new Date().toISOString().split('T')[0];
     const agoraHora = new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // Todos os agendamentos de hoje (para filtrar no frontend por horário)
+    // Todos os agendamentos de hoje
     const data = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
@@ -141,12 +141,12 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       ) ORDER BY hora ASC
     `, [hoje, hoje]);
 
-    // Estatísticas (somente o que já passou do horário ou está confirmado)
+    // Estatísticas (somente o que já passou do horário, independente de confirmado ou não)
     const stats = await get(`
       SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
-        SUM(CASE WHEN status = 'Confirmado' OR (status = 'Pendente' AND hora < ?) THEN 1 ELSE 0 END) as realized
+        SUM(CASE WHEN hora < ? THEN 1 ELSE 0 END) as realized
       FROM (
         SELECT status, preco, data, hora FROM agendamentos WHERE data = ?
         UNION ALL
