@@ -8,6 +8,7 @@ import clientesRoutes from './routes/clientes.js';
 import agendamentosRoutes from './routes/agendamentos.js';
 import agendamentosYuriRoutes from './routes/agendamentos-yuri.js';
 import relatoriosRoutes from './routes/relatorios.js';
+import assinantesRoutes from './routes/assinantes.js';
 
 // Importar inicialização do banco
 import { initDatabase } from './database/database.js';
@@ -44,6 +45,7 @@ app.use('/api/clientes', clientesRoutes);
 app.use('/api/agendamentos', agendamentosRoutes);
 app.use('/api/agendamentos-yuri', agendamentosYuriRoutes);
 app.use('/api/relatorios', relatoriosRoutes);
+app.use('/api/assinantes', assinantesRoutes);
 
 // Rota 404 para APIs não encontradas
 app.use('*', (req, res) => {
