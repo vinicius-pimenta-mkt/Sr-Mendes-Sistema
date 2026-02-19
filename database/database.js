@@ -41,7 +41,7 @@ export const initDatabase = async () => {
       )
     `);
 
-    // Tabela de agendamentos - Lucas (Adicionada coluna forma_pagamento)
+    // Tabela de agendamentos - Lucas
     await db.exec(`
       CREATE TABLE IF NOT EXISTS agendamentos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +60,7 @@ export const initDatabase = async () => {
       )
     `);
 
-    // Tabela de agendamentos - Yuri (Adicionada coluna forma_pagamento)
+    // Tabela de agendamentos - Yuri
     await db.exec(`
       CREATE TABLE IF NOT EXISTS agendamentos_yuri (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,16 +79,29 @@ export const initDatabase = async () => {
       )
     `);
 
-    // Migração: Adicionar coluna forma_pagamento se não existir (para bancos já criados)
-    try {
-      await db.exec("ALTER TABLE agendamentos ADD COLUMN forma_pagamento TEXT");
-      console.log("Migração: Coluna forma_pagamento adicionada em agendamentos.");
-    } catch (e) { /* Coluna já existe */ }
+    // Tabela de Assinantes (Atualizada: Telefone -> CPF)
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS assinantes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        cpf TEXT NOT NULL, -- Alterado de telefone para cpf
+        plano TEXT NOT NULL,
+        data_vencimento TEXT, -- Formato: DD/MM
+        ultima_visita TEXT,
+        ultimo_pagamento TEXT,
+        forma_pagamento TEXT,
+        status TEXT DEFAULT 'Ativo',
+        data_cadastro DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
-    try {
-      await db.exec("ALTER TABLE agendamentos_yuri ADD COLUMN forma_pagamento TEXT");
-      console.log("Migração: Coluna forma_pagamento adicionada em agendamentos_yuri.");
-    } catch (e) { /* Coluna já existe */ }
+    // Migrações de segurança
+    try { await db.exec("ALTER TABLE agendamentos ADD COLUMN forma_pagamento TEXT"); } catch (e) {}
+    try { await db.exec("ALTER TABLE agendamentos_yuri ADD COLUMN forma_pagamento TEXT"); } catch (e) {}
+    
+    // Tentar adicionar CPF se a tabela já existir mas não tiver a coluna
+    try { await db.exec("ALTER TABLE assinantes ADD COLUMN cpf TEXT"); } catch (e) {}
 
     // Inserir usuário admin padrão se não existir
     const adminUser = process.env.ADMIN_USER || 'adminmendes';
@@ -108,23 +121,17 @@ export const initDatabase = async () => {
 };
 
 export const query = async (sql, params = []) => {
-  if (!db) {
-    throw new Error('Database not initialized. Call initDatabase() first.');
-  }
+  if (!db) throw new Error('Database not initialized.');
   return await db.run(sql, params);
 };
 
 export const get = async (sql, params = []) => {
-  if (!db) {
-    throw new Error('Database not initialized. Call initDatabase() first.');
-  }
+  if (!db) throw new Error('Database not initialized.');
   return await db.get(sql, params);
 };
 
 export const all = async (sql, params = []) => {
-  if (!db) {
-    throw new Error('Database not initialized. Call initDatabase() first.');
-  }
+  if (!db) throw new Error('Database not initialized.');
   return await db.all(sql, params);
 };
 
