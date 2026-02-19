@@ -64,20 +64,36 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
     const byService = Object.values(serviceMap).sort((a, b) => b.total_qty - a.total_qty);
 
-    // 2. Evolução da Receita
+    // 2. Evolução da Receita (Ajustado para HORA se for Hoje)
+    const isToday = dIni === dFim && dIni === hoje.toISOString().split('T')[0];
     let revenueQuery = "";
-    if (barber === 'Geral') {
-      revenueQuery = `SELECT data, SUM(COALESCE(preco, 0)) as total FROM (SELECT data, preco, status FROM agendamentos UNION ALL SELECT data, preco, status FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
-    } else if (barber === 'Lucas') {
-      revenueQuery = `SELECT data, SUM(COALESCE(preco, 0)) as total FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
+    let rawRevenue = [];
+
+    if (isToday) {
+      // Agrupar por hora
+      if (barber === 'Geral') {
+        revenueQuery = `SELECT substr(hora, 1, 2) || ':00' as periodo, SUM(COALESCE(preco, 0)) as total FROM (SELECT data, hora, preco, status FROM agendamentos UNION ALL SELECT data, hora, preco, status FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data = ? GROUP BY periodo ORDER BY periodo`;
+      } else if (barber === 'Lucas') {
+        revenueQuery = `SELECT substr(hora, 1, 2) || ':00' as periodo, SUM(COALESCE(preco, 0)) as total FROM agendamentos WHERE status = 'Confirmado' AND data = ? GROUP BY periodo ORDER BY periodo`;
+      } else {
+        revenueQuery = `SELECT substr(hora, 1, 2) || ':00' as periodo, SUM(COALESCE(preco, 0)) as total FROM agendamentos_yuri WHERE status = 'Confirmado' AND data = ? GROUP BY periodo ORDER BY periodo`;
+      }
+      rawRevenue = await all(revenueQuery, [dIni]);
     } else {
-      revenueQuery = `SELECT data, SUM(COALESCE(preco, 0)) as total FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
+      // Agrupar por data
+      if (barber === 'Geral') {
+        revenueQuery = `SELECT data as periodo, SUM(COALESCE(preco, 0)) as total FROM (SELECT data, preco, status FROM agendamentos UNION ALL SELECT data, preco, status FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
+      } else if (barber === 'Lucas') {
+        revenueQuery = `SELECT data as periodo, SUM(COALESCE(preco, 0)) as total FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
+      } else {
+        revenueQuery = `SELECT data as periodo, SUM(COALESCE(preco, 0)) as total FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
+      }
+      rawRevenue = await all(revenueQuery, [dIni, dFim]);
     }
-    const rawRevenue = await all(revenueQuery, [dIni, dFim]);
+
     const receitaDet = rawRevenue.map(r => ({ 
-      periodo: r.data.split('-').reverse().join('/'), 
-      valor: (r.total || 0) / 100,
-      data_original: r.data
+      periodo: isToday ? r.periodo : r.periodo.split('-').reverse().join('/'), 
+      valor: (r.total || 0) / 100
     }));
 
     // 3. Receita por Meio de Pagamento
