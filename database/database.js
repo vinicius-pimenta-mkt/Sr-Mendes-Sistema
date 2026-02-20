@@ -47,6 +47,7 @@ export const initDatabase = async () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         cliente_id INTEGER,
         cliente_nome TEXT NOT NULL,
+        cliente_telefone TEXT,
         servico TEXT NOT NULL,
         data TEXT NOT NULL,
         hora TEXT NOT NULL,
@@ -66,6 +67,7 @@ export const initDatabase = async () => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         cliente_id INTEGER,
         cliente_nome TEXT NOT NULL,
+        cliente_telefone TEXT,
         servico TEXT NOT NULL,
         data TEXT NOT NULL,
         hora TEXT NOT NULL,
@@ -79,12 +81,13 @@ export const initDatabase = async () => {
       )
     `);
 
-    // Tabela de Assinantes (Atualizada: Telefone -> CPF)
+    // Tabela de Assinantes
     await db.exec(`
       CREATE TABLE IF NOT EXISTS assinantes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nome TEXT NOT NULL,
-        cpf TEXT NOT NULL, -- Alterado de telefone para cpf
+        cpf TEXT,
+        telefone TEXT,
         plano TEXT NOT NULL,
         data_vencimento TEXT, -- Formato: DD/MM
         ultima_visita TEXT,
@@ -99,9 +102,10 @@ export const initDatabase = async () => {
     // Migrações de segurança
     try { await db.exec("ALTER TABLE agendamentos ADD COLUMN forma_pagamento TEXT"); } catch (e) {}
     try { await db.exec("ALTER TABLE agendamentos_yuri ADD COLUMN forma_pagamento TEXT"); } catch (e) {}
-    
-    // Tentar adicionar CPF se a tabela já existir mas não tiver a coluna
+    try { await db.exec("ALTER TABLE agendamentos ADD COLUMN cliente_telefone TEXT"); } catch (e) {}
+    try { await db.exec("ALTER TABLE agendamentos_yuri ADD COLUMN cliente_telefone TEXT"); } catch (e) {}
     try { await db.exec("ALTER TABLE assinantes ADD COLUMN cpf TEXT"); } catch (e) {}
+    try { await db.exec("ALTER TABLE assinantes ADD COLUMN telefone TEXT"); } catch (e) {}
 
     // Inserir usuário admin padrão se não existir
     const adminUser = process.env.ADMIN_USER || 'adminmendes';
