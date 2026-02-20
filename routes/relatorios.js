@@ -142,6 +142,8 @@ router.get('/resumo', verifyToken, async (req, res) => {
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const agora = new Date();
+    // Ajuste para o timezone do servidor/brasília se necessário, 
+    // mas aqui usaremos o padrão ISO que é o que está no banco
     const hoje = agora.toISOString().split('T')[0];
     const amanha = new Date(agora);
     amanha.setDate(amanha.getDate() + 1);
@@ -161,10 +163,12 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       ) ORDER BY data ASC, hora ASC
     `, [hoje, amanhaStr, hoje, amanhaStr]);
 
-    // FILTRAGEM DE PRÓXIMAS 24 HORAS
+    // FILTRAGEM DE PRÓXIMAS 24 HORAS (APENAS FUTUROS)
     const agendamentos24h = todosAgendamentos.filter(a => {
-      if (a.data === hoje) return a.hora >= agoraHora; // Hoje a partir de agora
-      if (a.data === amanhaStr) return a.hora < agoraHora; // Amanhã até a mesma hora
+      // Se for hoje, tem que ser hora maior ou igual à atual
+      if (a.data === hoje) return a.hora >= agoraHora;
+      // Se for amanhã, tem que ser hora menor que a atual (para fechar 24h exatas)
+      if (a.data === amanhaStr) return a.hora < agoraHora;
       return false;
     });
 
@@ -173,21 +177,20 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       SELECT 
         COUNT(*) as total_dia,
         SUM(CASE WHEN hora < ? THEN 1 ELSE 0 END) as realizados,
-        SUM(CASE WHEN hora >= ? THEN 1 ELSE 0 END) as aguardando,
         SUM(CASE WHEN status = 'Confirmado' AND hora < ? THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
       FROM (
         SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
         UNION ALL
         SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
       )
-    `, [agoraHora, agoraHora, agoraHora, hoje, hoje]);
+    `, [agoraHora, agoraHora, hoje, hoje]);
 
     res.json({
       atendimentosHoje: statsHoje.total_dia || 0,
       receitaDia: (statsHoje.receita_realizada || 0) / 100,
       servicosRealizados: statsHoje.realizados || 0,
-      servicosAguardando: agendamentos24h.length, // Contagem exata das próximas 24h
-      agendamentos: agendamentos24h, // Lista bruta para as tabelas
+      servicosAguardando: agendamentos24h.length, // Contagem exata das próximas 24h futuras
+      agendamentos: agendamentos24h, // Lista filtrada para as tabelas
       agoraHora
     });
   } catch (error) {
