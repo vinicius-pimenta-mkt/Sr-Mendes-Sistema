@@ -149,8 +149,9 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     
     const agoraHora = agora.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // Buscar agendamentos de hoje e amanhã (para cobrir as próximas 24h)
-    const data = await all(`
+    // BUSCA DIRETA DA AGENDA (TODOS OS STATUS EXCETO CANCELADO)
+    // Buscamos hoje e amanhã para garantir as próximas 24h
+    const todosAgendamentos = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
         WHERE status != 'Cancelado' AND (data = ? OR data = ?)
@@ -160,31 +161,33 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       ) ORDER BY data ASC, hora ASC
     `, [hoje, amanhaStr, hoje, amanhaStr]);
 
-    // Filtrar no código para pegar exatamente as próximas 24h
-    const agendamentosProximas24h = data.filter(a => {
-      if (a.data === hoje) return a.hora >= agoraHora;
-      if (a.data === amanhaStr) return a.hora < agoraHora;
+    // FILTRAGEM DE PRÓXIMAS 24 HORAS
+    const agendamentos24h = todosAgendamentos.filter(a => {
+      if (a.data === hoje) return a.hora >= agoraHora; // Hoje a partir de agora
+      if (a.data === amanhaStr) return a.hora < agoraHora; // Amanhã até a mesma hora
       return false;
     });
 
-    const stats = await get(`
+    // ESTATÍSTICAS BASEADAS NO TEMPO REAL DE HOJE
+    const statsHoje = await get(`
       SELECT 
         COUNT(*) as total_dia,
         SUM(CASE WHEN hora < ? THEN 1 ELSE 0 END) as realizados,
+        SUM(CASE WHEN hora >= ? THEN 1 ELSE 0 END) as aguardando,
         SUM(CASE WHEN status = 'Confirmado' AND hora < ? THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
       FROM (
         SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
         UNION ALL
         SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
       )
-    `, [agoraHora, agoraHora, hoje, hoje]);
+    `, [agoraHora, agoraHora, agoraHora, hoje, hoje]);
 
     res.json({
-      atendimentosHoje: stats.total_dia || 0,
-      receitaDia: (stats.receita_realizada || 0) / 100,
-      servicosRealizados: stats.realizados || 0,
-      servicosAguardando: agendamentosProximas24h.length,
-      agendamentos: agendamentosProximas24h,
+      atendimentosHoje: statsHoje.total_dia || 0,
+      receitaDia: (statsHoje.receita_realizada || 0) / 100,
+      servicosRealizados: statsHoje.realizados || 0,
+      servicosAguardando: agendamentos24h.length, // Contagem exata das próximas 24h
+      agendamentos: agendamentos24h, // Lista bruta para as tabelas
       agoraHora
     });
   } catch (error) {
