@@ -143,21 +143,36 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
-    const hoje = new Date().toISOString().split('T')[0];
-    const agoraHora = new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    const hojeData = new Date();
+    const amanhaData = new Date(hojeData);
+    amanhaData.setDate(hojeData.getDate() + 1);
 
-    // Todos os agendamentos de hoje
+    const hojeStr = hojeData.toISOString().split('T')[0];
+    const amanhaStr = amanhaData.toISOString().split('T')[0];
+    const agoraHora = hojeData.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+    // Buscar agendamentos de hoje (daqui pra frente) e de amanhã (até o mesmo horário para completar 24h)
+    // Para simplificar e garantir que pegamos as próximas 24h, pegamos tudo de hoje e amanhã e filtramos no JS ou via SQL complexo
+    // Vamos usar SQL para pegar agendamentos futuros nas próximas 24h
     const data = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
-        WHERE status != 'Cancelado' AND data = ?
+        WHERE status != 'Cancelado' AND (
+          (data = ? AND hora >= ?) OR 
+          (data = ? AND hora <= ?) OR
+          (data > ? AND data < ?)
+        )
         UNION ALL
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
-        WHERE status != 'Cancelado' AND data = ?
-      ) ORDER BY hora ASC
-    `, [hoje, hoje]);
+        WHERE status != 'Cancelado' AND (
+          (data = ? AND hora >= ?) OR 
+          (data = ? AND hora <= ?) OR
+          (data > ? AND data < ?)
+        )
+      ) ORDER BY data ASC, hora ASC
+    `, [hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, amanhaStr, hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, amanhaStr]);
 
-    // Estatísticas (somente o que já passou do horário, independente de confirmado ou não)
+    // Estatísticas do dia de hoje
     const stats = await get(`
       SELECT 
         COUNT(*) as total,
@@ -168,7 +183,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         UNION ALL
         SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ?
       )
-    `, [agoraHora, hoje, hoje]);
+    `, [agoraHora, hojeStr, hojeStr]);
 
     res.json({
       atendimentosHoje: stats.total || 0,
