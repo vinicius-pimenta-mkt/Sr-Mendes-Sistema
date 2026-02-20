@@ -36,6 +36,7 @@ export const initDatabase = async () => {
         nome TEXT NOT NULL,
         telefone TEXT,
         email TEXT,
+        cpf TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -106,10 +107,11 @@ export const initDatabase = async () => {
     try { await db.exec("ALTER TABLE agendamentos_yuri ADD COLUMN cliente_telefone TEXT"); } catch (e) {}
     try { await db.exec("ALTER TABLE assinantes ADD COLUMN cpf TEXT"); } catch (e) {}
     try { await db.exec("ALTER TABLE assinantes ADD COLUMN telefone TEXT"); } catch (e) {}
+    try { await db.exec("ALTER TABLE clientes ADD COLUMN cpf TEXT"); } catch (e) {}
 
     // Inserir usuário admin padrão se não existir
-    const adminUser = process.env.ADMIN_USER || 'adminbm';
-    const adminPass = process.env.ADMIN_PASS || 'belmasc2026';
+    const adminUser = process.env.ADMIN_USER || 'adminmendes';
+    const adminPass = process.env.ADMIN_PASS || 'mendesbarber01';
 
     const existingUser = await db.get('SELECT * FROM users WHERE username = ?', adminUser);
     if (!existingUser) {
