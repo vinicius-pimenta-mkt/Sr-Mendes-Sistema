@@ -108,8 +108,8 @@ export const initDatabase = async () => {
     try { await db.exec("ALTER TABLE assinantes ADD COLUMN telefone TEXT"); } catch (e) {}
 
     // Inserir usuário admin padrão se não existir
-    const adminUser = process.env.ADMIN_USER || 'adminmendes';
-    const adminPass = process.env.ADMIN_PASS || 'mendesbarber01';
+    const adminUser = process.env.ADMIN_USER || 'adminbm';
+    const adminPass = process.env.ADMIN_PASS || 'belmasc2026';
 
     const existingUser = await db.get('SELECT * FROM users WHERE username = ?', adminUser);
     if (!existingUser) {
