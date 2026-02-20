@@ -142,8 +142,8 @@ router.get('/resumo', verifyToken, async (req, res) => {
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const agora = new Date();
-    // Ajuste para o timezone do servidor/brasília se necessário, 
-    // mas aqui usaremos o padrão ISO que é o que está no banco
+    // Ajuste manual para o fuso horário de Brasília (GMT-3) se necessário
+    // Aqui assumimos que o servidor está configurado corretamente ou o banco usa ISO
     const hoje = agora.toISOString().split('T')[0];
     const amanha = new Date(agora);
     amanha.setDate(amanha.getDate() + 1);
@@ -151,8 +151,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     
     const agoraHora = agora.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // BUSCA DIRETA DA AGENDA (TODOS OS STATUS EXCETO CANCELADO)
-    // Buscamos hoje e amanhã para garantir as próximas 24h
+    // BUSCA DIRETA DA AGENDA (Lucas e Yuri)
+    // Filtramos apenas agendamentos que NÃO foram cancelados
     const todosAgendamentos = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
@@ -172,7 +172,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       return false;
     });
 
-    // ESTATÍSTICAS BASEADAS NO TEMPO REAL DE HOJE
+    // ESTATÍSTICAS DO DIA (Baseadas na Agenda)
     const statsHoje = await get(`
       SELECT 
         COUNT(*) as total_dia,
@@ -189,8 +189,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       atendimentosHoje: statsHoje.total_dia || 0,
       receitaDia: (statsHoje.receita_realizada || 0) / 100,
       servicosRealizados: statsHoje.realizados || 0,
-      servicosAguardando: agendamentos24h.length, // Contagem exata das próximas 24h futuras
-      agendamentos: agendamentos24h, // Lista filtrada para as tabelas
+      servicosAguardando: agendamentos24h.length, // Contagem dos agendamentos futuros nas próximas 24h
+      agendamentos: agendamentos24h, // Lista filtrada para as tabelas de Lucas e Yuri
       agoraHora
     });
   } catch (error) {
