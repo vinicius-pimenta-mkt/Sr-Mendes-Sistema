@@ -142,17 +142,15 @@ router.get('/resumo', verifyToken, async (req, res) => {
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const agora = new Date();
-    // Ajuste manual para o fuso horário de Brasília (GMT-3) se necessário
-    // Aqui assumimos que o servidor está configurado corretamente ou o banco usa ISO
     const hoje = agora.toISOString().split('T')[0];
     const amanha = new Date(agora);
     amanha.setDate(amanha.getDate() + 1);
     const amanhaStr = amanha.toISOString().split('T')[0];
     
+    // Hora atual em formato HH:MM (24h)
     const agoraHora = agora.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // BUSCA DIRETA DA AGENDA (Lucas e Yuri)
-    // Filtramos apenas agendamentos que NÃO foram cancelados
+    // BUSCA DA AGENDA: Agendamentos que NÃO foram cancelados para hoje e amanhã
     const todosAgendamentos = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
@@ -163,16 +161,20 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       ) ORDER BY data ASC, hora ASC
     `, [hoje, amanhaStr, hoje, amanhaStr]);
 
-    // FILTRAGEM DE PRÓXIMAS 24 HORAS (APENAS FUTUROS)
+    // FILTRAGEM RIGOROSA: Apenas agendamentos FUTUROS (próximas 24h)
     const agendamentos24h = todosAgendamentos.filter(a => {
-      // Se for hoje, tem que ser hora maior ou igual à atual
-      if (a.data === hoje) return a.hora >= agoraHora;
-      // Se for amanhã, tem que ser hora menor que a atual (para fechar 24h exatas)
-      if (a.data === amanhaStr) return a.hora < agoraHora;
+      // Se for hoje: hora deve ser ESTRITAMENTE MAIOR que a hora atual
+      if (a.data === hoje) {
+        return a.hora > agoraHora;
+      }
+      // Se for amanhã: hora deve ser MENOR ou IGUAL que a hora atual (completa 24h)
+      if (a.data === amanhaStr) {
+        return a.hora <= agoraHora;
+      }
       return false;
     });
 
-    // ESTATÍSTICAS DO DIA (Baseadas na Agenda)
+    // ESTATÍSTICAS DO DIA: Agendamentos que já passaram (realizados)
     const statsHoje = await get(`
       SELECT 
         COUNT(*) as total_dia,
@@ -189,8 +191,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       atendimentosHoje: statsHoje.total_dia || 0,
       receitaDia: (statsHoje.receita_realizada || 0) / 100,
       servicosRealizados: statsHoje.realizados || 0,
-      servicosAguardando: agendamentos24h.length, // Contagem dos agendamentos futuros nas próximas 24h
-      agendamentos: agendamentos24h, // Lista filtrada para as tabelas de Lucas e Yuri
+      servicosAguardando: agendamentos24h.length,
+      agendamentos: agendamentos24h,
       agoraHora
     });
   } catch (error) {
