@@ -46,24 +46,29 @@ router.get('/', verifyToken, async (req, res) => {
 // Criar novo agendamento para o Yuri (e atualizar última visita se for assinante)
 router.post('/', async (req, res) => {
   try {
-    const { cliente_nome, servico, data, hora, status = 'Pendente', preco, forma_pagamento, observacoes, cliente_id } = req.body;
+    const { cliente_nome, cliente_telefone, servico, data, hora, status = 'Pendente', preco, forma_pagamento, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
     }
 
     const result = await query(
-      'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [cliente_id, cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes]
+      'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes]
     );
 
     if (status === 'Confirmado') {
       const dataVisita = `${data.split('-').reverse().join('/')} ${hora}`;
-      await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
+      if (cliente_telefone) {
+        await query('UPDATE assinantes SET ultima_visita = ? WHERE telefone = ? OR nome = ?', [dataVisita, cliente_telefone, cliente_nome]);
+      } else {
+        await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
+      }
     }
     
     res.status(201).json({ id: result.lastID, message: 'Agendamento criado para o Yuri' });
   } catch (error) {
+    console.error('Erro ao criar agendamento Yuri:', error);
     res.status(500).json({ error: 'Erro ao criar agendamento do Yuri' });
   }
 });
@@ -72,16 +77,20 @@ router.post('/', async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
+    const { cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
 
     await query(
-      'UPDATE agendamentos_yuri SET cliente_nome=?, servico=?, data=?, hora=?, status=?, preco=?, forma_pagamento=?, observacoes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-      [cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes, id]
+      'UPDATE agendamentos_yuri SET cliente_nome=?, cliente_telefone=?, servico=?, data=?, hora=?, status=?, preco=?, forma_pagamento=?, observacoes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+      [cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes, id]
     );
 
     if (status === 'Confirmado') {
       const dataVisita = `${data.split('-').reverse().join('/')} ${hora}`;
-      await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
+      if (cliente_telefone) {
+        await query('UPDATE assinantes SET ultima_visita = ? WHERE telefone = ? OR nome = ?', [dataVisita, cliente_telefone, cliente_nome]);
+      } else {
+        await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
+      }
     }
     
     res.json({ message: 'Agendamento do Yuri atualizado' });
