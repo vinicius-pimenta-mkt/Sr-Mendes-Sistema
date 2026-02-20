@@ -151,28 +151,25 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const amanhaStr = amanhaData.toISOString().split('T')[0];
     const agoraHora = hojeData.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // Buscar agendamentos de hoje (daqui pra frente) e de amanhã (até o mesmo horário para completar 24h)
-    // Para simplificar e garantir que pegamos as próximas 24h, pegamos tudo de hoje e amanhã e filtramos no JS ou via SQL complexo
-    // Vamos usar SQL para pegar agendamentos futuros nas próximas 24h
+    // Buscar agendamentos FUTUROS (daqui pra frente nas próximas 24h)
+    // Filtramos rigorosamente: (Hoje e Hora >= Agora) OU (Amanhã e Hora <= Agora)
     const data = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
         WHERE status != 'Cancelado' AND (
-          (data = ? AND hora >= ?) OR 
-          (data = ? AND hora <= ?) OR
-          (data > ? AND data < ?)
+          (data = ? AND hora > ?) OR 
+          (data = ? AND hora <= ?)
         )
         UNION ALL
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
         WHERE status != 'Cancelado' AND (
-          (data = ? AND hora >= ?) OR 
-          (data = ? AND hora <= ?) OR
-          (data > ? AND data < ?)
+          (data = ? AND hora > ?) OR 
+          (data = ? AND hora <= ?)
         )
       ) ORDER BY data ASC, hora ASC
-    `, [hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, amanhaStr, hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, amanhaStr]);
+    `, [hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, agoraHora, amanhaStr, agoraHora]);
 
-    // Estatísticas do dia de hoje
+    // Estatísticas do dia de hoje (total de agendamentos e receita)
     const stats = await get(`
       SELECT 
         COUNT(*) as total,
