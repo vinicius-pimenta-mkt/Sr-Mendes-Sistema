@@ -153,18 +153,28 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     // ============================================================================
     // PARTE 1: DADOS HISTÓRICOS (Hoje de 00:00 até agora)
     // ============================================================================
-    // Total de agendamentos de hoje (independente da hora)
-    const statsHoje = await get(`
-      SELECT 
-        COUNT(*) as total_dia,
-        SUM(CASE WHEN hora < ? THEN 1 ELSE 0 END) as realizados,
-        SUM(CASE WHEN status = 'Confirmado' AND hora < ? THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
+    
+    // Total de agendamentos de hoje (independente da hora) - TODOS os agendamentos do dia
+    const totalHoje = await get(`
+      SELECT COUNT(*) as total_dia
       FROM (
-        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
+        SELECT id FROM agendamentos WHERE data = ? AND status != 'Cancelado'
         UNION ALL
-        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
+        SELECT id FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
       )
-    `, [agoraHora, agoraHora, hoje, hoje]);
+    `, [hoje, hoje]);
+
+    // Agendamentos realizados (hora já passou) e receita confirmada
+    const statsRealizados = await get(`
+      SELECT 
+        COUNT(*) as realizados,
+        SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
+      FROM (
+        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado' AND hora < ?
+        UNION ALL
+        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado' AND hora < ?
+      )
+    `, [hoje, agoraHora, hoje, agoraHora]);
 
     // ============================================================================
     // PARTE 2: DADOS FUTUROS (Próximas 24h a partir de agora)
@@ -194,12 +204,14 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     });
 
     res.json({
-      atendimentosHoje: statsHoje.total_dia || 0,
-      receitaDia: (statsHoje.receita_realizada || 0) / 100,
-      servicosRealizados: statsHoje.realizados || 0,
+      atendimentosHoje: totalHoje.total_dia || 0,
+      receitaDia: (statsRealizados.receita_realizada || 0) / 100,
+      servicosRealizados: statsRealizados.realizados || 0,
       servicosAguardando: agendamentos24h.length,
       agendamentos: agendamentos24h,
-      agoraHora
+      agoraHora,
+      hoje,
+      amanha: amanhaStr
     });
   } catch (error) {
     console.error('Erro em /dashboard:', error);
