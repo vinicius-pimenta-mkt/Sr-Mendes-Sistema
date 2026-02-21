@@ -4,11 +4,37 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
+// Função auxiliar para obter a data e hora atual em Brasília (GMT-3)
+function getHojeEAgoraEmBrasilia() {
+  // Cria um objeto Date com o horário atual
+  const agora = new Date();
+  
+  // Converte para string ISO e depois ajusta para Brasília (GMT-3)
+  // Brasília está 3 horas atrás de UTC
+  const offset = -3 * 60 * 60 * 1000; // -3 horas em milissegundos
+  const agoraBrasilia = new Date(agora.getTime() + offset);
+  
+  // Extrai a data em formato YYYY-MM-DD
+  const hoje = agoraBrasilia.toISOString().split('T')[0];
+  
+  // Extrai a hora em formato HH:MM
+  const agoraHora = agoraBrasilia.toISOString().split('T')[1].substring(0, 5);
+  
+  // Calcula amanhã
+  const amanhaDate = new Date(agoraBrasilia);
+  amanhaDate.setDate(amanhaDate.getDate() + 1);
+  const amanha = amanhaDate.toISOString().split('T')[0];
+  
+  console.log(`[Dashboard] Data/Hora Brasília - Hoje: ${hoje}, Agora: ${agoraHora}, Amanhã: ${amanha}`);
+  
+  return { hoje, agoraHora, amanha };
+}
+
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
     const { periodo = 'mes', data_inicio, data_fim, barber = 'Geral' } = req.query;
     let dIni, dFim;
-    const hoje = new Date();
+    const { hoje } = getHojeEAgoraEmBrasilia();
     
     if (data_inicio && data_fim) {
       dIni = data_inicio;
@@ -18,16 +44,27 @@ router.get('/resumo', verifyToken, async (req, res) => {
       switch (periodo) {
         case 'hoje': dataInicio = hoje; break;
         case 'ontem': 
-          dataInicio = new Date(); dataInicio.setDate(hoje.getDate() - 1); break;
+          const ontem = new Date(hoje);
+          ontem.setDate(ontem.getDate() - 1);
+          dataInicio = ontem.toISOString().split('T')[0];
+          break;
         case 'semana': 
-          dataInicio = new Date(); dataInicio.setDate(hoje.getDate() - 7); break;
+          const semanaAtras = new Date(hoje);
+          semanaAtras.setDate(semanaAtras.getDate() - 7);
+          dataInicio = semanaAtras.toISOString().split('T')[0];
+          break;
         case 'ano': 
-          dataInicio = new Date(); dataInicio.setFullYear(hoje.getFullYear() - 1); break;
+          const anoAtras = new Date(hoje);
+          anoAtras.setFullYear(anoAtras.getFullYear() - 1);
+          dataInicio = anoAtras.toISOString().split('T')[0];
+          break;
         default: // mes
-          dataInicio = new Date(); dataInicio.setMonth(hoje.getMonth() - 1);
+          const mesAtras = new Date(hoje);
+          mesAtras.setMonth(mesAtras.getMonth() - 1);
+          dataInicio = mesAtras.toISOString().split('T')[0];
       }
-      dIni = dataInicio.toISOString().split('T')[0];
-      dFim = hoje.toISOString().split('T')[0];
+      dIni = dataInicio;
+      dFim = hoje;
     }
     
     // 1. Serviços por Barbeiro (Unificação para o Gráfico Geral)
@@ -65,7 +102,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
     const byService = Object.values(serviceMap).sort((a, b) => b.total_qty - a.total_qty);
 
     // 2. Evolução da Receita
-    const isToday = dIni === dFim && dIni === hoje.toISOString().split('T')[0];
+    const isToday = dIni === dFim && dIni === hoje;
     let revenueQuery = "";
     let rawRevenue = [];
 
@@ -141,17 +178,9 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
-    const agora = new Date();
-    const hoje = agora.toISOString().split('T')[0]; // Ex: '2026-02-20'
-    const amanha = new Date(agora);
-    amanha.setDate(amanha.getDate() + 1);
-    const amanhaStr = amanha.toISOString().split('T')[0]; // Ex: '2026-02-21'
-    
-    // Hora atual em formato HH:MM (24h) - Ex: '14:30'
-    const agoraHora = agora.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    const { hoje, agoraHora, amanha } = getHojeEAgoraEmBrasilia();
 
-    console.log(`[Dashboard Debug] Server Time: ${agora.toISOString()}`);
-    console.log(`[Dashboard Debug] Hoje (str): ${hoje}, Amanhã (str): ${amanhaStr}, Hora Atual (str): ${agoraHora}`);
+    console.log(`[Dashboard] Processando com Hoje=${hoje}, Agora=${agoraHora}, Amanhã=${amanha}`);
 
     // ============================================================================
     // PARTE 1: DADOS HISTÓRICOS (Hoje de 00:00 até agora)
@@ -167,53 +196,61 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       )
     `, [hoje, hoje]);
     const atendimentosHoje = totalHojeResult ? totalHojeResult.total_dia : 0;
-    console.log(`[Dashboard Debug] Total de agendamentos hoje (00:00-23:59): ${atendimentosHoje}`);
+    console.log(`[Dashboard] Total agendamentos hoje: ${atendimentosHoje}`);
 
     // Agendamentos realizados (hora já passou) e receita confirmada (00:00 até agora)
-    // Usamos CAST para garantir comparação correta de strings de hora
+    // Comparação de hora como string: "14:30" < "15:00"
     const statsRealizadosResult = await get(`
       SELECT 
         COUNT(*) as realizados,
         SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
       FROM (
-        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado' AND CAST(hora AS TEXT) < ?
+        SELECT status, preco, data, hora FROM agendamentos 
+        WHERE data = ? AND status != 'Cancelado' AND hora < ?
         UNION ALL
-        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado' AND CAST(hora AS TEXT) < ?
+        SELECT status, preco, data, hora FROM agendamentos_yuri 
+        WHERE data = ? AND status != 'Cancelado' AND hora < ?
       )
     `, [hoje, agoraHora, hoje, agoraHora]);
     const servicosRealizados = statsRealizadosResult ? statsRealizadosResult.realizados : 0;
     const receitaDia = statsRealizadosResult ? (statsRealizadosResult.receita_realizada || 0) / 100 : 0;
-    console.log(`[Dashboard Debug] Serviços Realizados (00:00-agora): ${servicosRealizados}, Receita (00:00-agora): ${receitaDia}`);
+    console.log(`[Dashboard] Serviços Realizados: ${servicosRealizados}, Receita: R$ ${receitaDia}`);
 
     // ============================================================================
     // PARTE 2: DADOS FUTUROS (Próximas 24h a partir de agora)
     // ============================================================================
     // Busca todos os agendamentos de hoje e amanhã (exceto cancelados)
     const todosAgendamentos = await all(`
-      SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
+      SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber 
+      FROM agendamentos 
       WHERE status != 'Cancelado' AND (data = ? OR data = ?)
       UNION ALL
-      SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
+      SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber 
+      FROM agendamentos_yuri 
       WHERE status != 'Cancelado' AND (data = ? OR data = ?)
       ORDER BY data ASC, hora ASC
-    `, [hoje, amanhaStr, hoje, amanhaStr]);
+    `, [hoje, amanha, hoje, amanha]);
 
-    console.log(`[Dashboard Debug] Total de agendamentos (hoje + amanha, não cancelados): ${todosAgendamentos.length}`);
+    console.log(`[Dashboard] Total de agendamentos (hoje + amanhã): ${todosAgendamentos.length}`);
 
     // Filtra apenas os agendamentos FUTUROS (próximas 24h a partir de agora)
-    // Lógica em JavaScript para garantir precisão
     const agendamentos24h = todosAgendamentos.filter(a => {
-      const agendamentoDateTime = new Date(`${a.data}T${a.hora}:00`); // Cria um objeto Date para comparação
-      
-      // Compara o agendamento com o momento 'agora'
-      const isFuture = agendamentoDateTime > agora;
-
-      console.log(`[Dashboard Debug] Agendamento: ${a.cliente_nome} ${a.data} ${a.hora} | isFuture: ${isFuture}`);
-      return isFuture;
+      // Para hoje: hora DEVE SER ESTRITAMENTE MAIOR que a hora atual
+      if (a.data === hoje) {
+        const isFuture = a.hora > agoraHora;
+        console.log(`[Dashboard] Hoje ${a.cliente_nome} ${a.hora}: ${isFuture ? 'FUTURO' : 'PASSADO'}`);
+        return isFuture;
+      }
+      // Para amanhã: TODOS os agendamentos de amanhã são futuros (próximas 24h)
+      if (a.data === amanha) {
+        console.log(`[Dashboard] Amanhã ${a.cliente_nome} ${a.hora}: FUTURO`);
+        return true;
+      }
+      return false;
     });
 
     const servicosAguardando = agendamentos24h.length;
-    console.log(`[Dashboard Debug] Agendamentos nas próximas 24h (futuros): ${servicosAguardando}`);
+    console.log(`[Dashboard] Agendamentos nas próximas 24h: ${servicosAguardando}`);
 
     res.json({
       atendimentosHoje,
@@ -223,7 +260,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       agendamentos: agendamentos24h,
       agoraHora,
       hoje,
-      amanha: amanhaStr
+      amanha
     });
   } catch (error) {
     console.error('Erro em /dashboard:', error);
