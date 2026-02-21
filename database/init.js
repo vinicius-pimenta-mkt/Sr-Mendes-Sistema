@@ -1,3 +1,4 @@
+import { seedDatabase } from './seed.js';
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -90,6 +91,7 @@ const initDatabase = () => {
             }
             
             console.log('Banco de dados inicializado com sucesso!');
+            await seedDatabase();
             resolve();
           });
         });
