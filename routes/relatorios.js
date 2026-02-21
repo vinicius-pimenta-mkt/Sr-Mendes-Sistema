@@ -6,28 +6,26 @@ const router = express.Router();
 
 // Função auxiliar para obter a data e hora atual em Brasília (GMT-3)
 function getHojeEAgoraEmBrasilia() {
-  // Cria um objeto Date com o horário atual
   const agora = new Date();
+  // Convertendo para o fuso horário de Brasília (GMT-3)
+  // A diferença de fuso horário para UTC é -3 horas.
+  // Date.prototype.toLocaleString com timeZone é a forma mais robusta.
+  const optionsDate = { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'America/Sao_Paulo' };
+  const optionsTime = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Sao_Paulo' };
+
+  const hojeBrasilia = agora.toLocaleString('en-CA', optionsDate).replace(/\//g, '-'); // Formato YYYY-MM-DD
+  const agoraHoraBrasilia = agora.toLocaleString('pt-BR', optionsTime);
+
+  // Para calcular 'amanha', precisamos de um objeto Date no fuso de Brasília
+  // Criamos um novo Date a partir da string de hoje em Brasília para evitar problemas de fuso
+  const hojeDate = new Date(hojeBrasilia + 'T00:00:00-03:00'); // Garante que é 00:00 de hoje em Brasília
+  const amanhaDate = new Date(hojeDate);
+  amanhaDate.setDate(hojeDate.getDate() + 1);
+  const amanhaBrasilia = amanhaDate.toISOString().split('T')[0];
   
-  // Converte para string ISO e depois ajusta para Brasília (GMT-3)
-  // Brasília está 3 horas atrás de UTC
-  const offset = -3 * 60 * 60 * 1000; // -3 horas em milissegundos
-  const agoraBrasilia = new Date(agora.getTime() + offset);
+  console.log(`[Dashboard] Data/Hora Brasília - Hoje: ${hojeBrasilia}, Agora: ${agoraHoraBrasilia}, Amanhã: ${amanhaBrasilia}`);
   
-  // Extrai a data em formato YYYY-MM-DD
-  const hoje = agoraBrasilia.toISOString().split('T')[0];
-  
-  // Extrai a hora em formato HH:MM
-  const agoraHora = agoraBrasilia.toISOString().split('T')[1].substring(0, 5);
-  
-  // Calcula amanhã
-  const amanhaDate = new Date(agoraBrasilia);
-  amanhaDate.setDate(amanhaDate.getDate() + 1);
-  const amanha = amanhaDate.toISOString().split('T')[0];
-  
-  console.log(`[Dashboard] Data/Hora Brasília - Hoje: ${hoje}, Agora: ${agoraHora}, Amanhã: ${amanha}`);
-  
-  return { hoje, agoraHora, amanha };
+  return { hoje: hojeBrasilia, agoraHora: agoraHoraBrasilia, amanha: amanhaBrasilia };
 }
 
 router.get('/resumo', verifyToken, async (req, res) => {
@@ -44,22 +42,22 @@ router.get('/resumo', verifyToken, async (req, res) => {
       switch (periodo) {
         case 'hoje': dataInicio = hoje; break;
         case 'ontem': 
-          const ontem = new Date(hoje);
+          const ontem = new Date(hoje + 'T00:00:00-03:00');
           ontem.setDate(ontem.getDate() - 1);
           dataInicio = ontem.toISOString().split('T')[0];
           break;
         case 'semana': 
-          const semanaAtras = new Date(hoje);
+          const semanaAtras = new Date(hoje + 'T00:00:00-03:00');
           semanaAtras.setDate(semanaAtras.getDate() - 7);
           dataInicio = semanaAtras.toISOString().split('T')[0];
           break;
         case 'ano': 
-          const anoAtras = new Date(hoje);
+          const anoAtras = new Date(hoje + 'T00:00:00-03:00');
           anoAtras.setFullYear(anoAtras.getFullYear() - 1);
           dataInicio = anoAtras.toISOString().split('T')[0];
           break;
         default: // mes
-          const mesAtras = new Date(hoje);
+          const mesAtras = new Date(hoje + 'T00:00:00-03:00');
           mesAtras.setMonth(mesAtras.getMonth() - 1);
           dataInicio = mesAtras.toISOString().split('T')[0];
       }
@@ -186,52 +184,62 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     // PARTE 1: DADOS HISTÓRICOS (Hoje de 00:00 até agora)
     // ============================================================================
     
-    // Total de agendamentos de hoje (00:00 às 23:59) - TODOS os agendamentos do dia
+    // Total de agendamentos de hoje (00:00 às 23:59) - TODOS os agendamentos do dia (Confirmado ou Pendente)
     const totalHojeResult = await get(`
       SELECT COUNT(*) as total_dia
       FROM (
-        SELECT id FROM agendamentos WHERE data = ? AND status != 'Cancelado'
+        SELECT id FROM agendamentos WHERE data = ? AND (status = 'Confirmado' OR status = 'Pendente')
         UNION ALL
-        SELECT id FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
+        SELECT id FROM agendamentos_yuri WHERE data = ? AND (status = 'Confirmado' OR status = 'Pendente')
       )
     `, [hoje, hoje]);
     const atendimentosHoje = totalHojeResult ? totalHojeResult.total_dia : 0;
-    console.log(`[Dashboard] Total agendamentos hoje: ${atendimentosHoje}`);
+    console.log(`[Dashboard] Total agendamentos hoje (00:00-23:59): ${atendimentosHoje}`);
 
-    // Agendamentos realizados (hora já passou) e receita confirmada (00:00 até agora)
-    // Comparação de hora como string: "14:30" < "15:00"
-    const statsRealizadosResult = await get(`
-      SELECT 
-        COUNT(*) as realizados,
-        SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
+    // Agendamentos realizados (hora já passou) - APENAS HOJE (Confirmado ou Pendente)
+    const servicosRealizadosResult = await get(`
+      SELECT COUNT(*) as realizados
       FROM (
-        SELECT status, preco, data, hora FROM agendamentos 
-        WHERE data = ? AND status != 'Cancelado' AND hora < ?
+        SELECT id FROM agendamentos 
+        WHERE data = ? AND (status = 'Confirmado' OR status = 'Pendente') AND hora < ?
         UNION ALL
-        SELECT status, preco, data, hora FROM agendamentos_yuri 
-        WHERE data = ? AND status != 'Cancelado' AND hora < ?
+        SELECT id FROM agendamentos_yuri 
+        WHERE data = ? AND (status = 'Confirmado' OR status = 'Pendente') AND hora < ?
       )
     `, [hoje, agoraHora, hoje, agoraHora]);
-    const servicosRealizados = statsRealizadosResult ? statsRealizadosResult.realizados : 0;
-    const receitaDia = statsRealizadosResult ? (statsRealizadosResult.receita_realizada || 0) / 100 : 0;
-    console.log(`[Dashboard] Serviços Realizados: ${servicosRealizados}, Receita: R$ ${receitaDia}`);
+    const servicosRealizados = servicosRealizadosResult ? servicosRealizadosResult.realizados : 0;
+    console.log(`[Dashboard] Serviços Realizados (hoje, até agora): ${servicosRealizados}`);
+
+    // Receita confirmada (APENAS HOJE, de agendamentos que já passaram e estão CONFIRMADOS)
+    const receitaDiaResult = await get(`
+      SELECT SUM(COALESCE(preco, 0)) as receita_realizada
+      FROM (
+        SELECT preco FROM agendamentos 
+        WHERE data = ? AND status = 'Confirmado' AND hora < ?
+        UNION ALL
+        SELECT preco FROM agendamentos_yuri 
+        WHERE data = ? AND status = 'Confirmado' AND hora < ?
+      )
+    `, [hoje, agoraHora, hoje, agoraHora]);
+    const receitaDia = receitaDiaResult ? (receitaDiaResult.receita_realizada || 0) / 100 : 0;
+    console.log(`[Dashboard] Receita do Dia (hoje, até agora): R$ ${receitaDia}`);
 
     // ============================================================================
     // PARTE 2: DADOS FUTUROS (Próximas 24h a partir de agora)
     // ============================================================================
-    // Busca todos os agendamentos de hoje e amanhã (exceto cancelados)
+    // Busca todos os agendamentos de hoje e amanhã (Confirmado ou Pendente, exceto Cancelado)
     const todosAgendamentos = await all(`
       SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber 
       FROM agendamentos 
-      WHERE status != 'Cancelado' AND (data = ? OR data = ?)
+      WHERE (status = 'Confirmado' OR status = 'Pendente') AND (data = ? OR data = ?)
       UNION ALL
       SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber 
       FROM agendamentos_yuri 
-      WHERE status != 'Cancelado' AND (data = ? OR data = ?)
+      WHERE (status = 'Confirmado' OR status = 'Pendente') AND (data = ? OR data = ?)
       ORDER BY data ASC, hora ASC
     `, [hoje, amanha, hoje, amanha]);
 
-    console.log(`[Dashboard] Total de agendamentos (hoje + amanhã): ${todosAgendamentos.length}`);
+    console.log(`[Dashboard] Total de agendamentos (hoje + amanhã, Confirmado ou Pendente): ${todosAgendamentos.length}`);
 
     // Filtra apenas os agendamentos FUTUROS (próximas 24h a partir de agora)
     const agendamentos24h = todosAgendamentos.filter(a => {
@@ -250,7 +258,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     });
 
     const servicosAguardando = agendamentos24h.length;
-    console.log(`[Dashboard] Agendamentos nas próximas 24h: ${servicosAguardando}`);
+    console.log(`[Dashboard] Agendamentos nas próximas 24h (Aguardando): ${servicosAguardando}`);
 
     res.json({
       atendimentosHoje,
