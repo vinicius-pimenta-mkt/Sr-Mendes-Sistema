@@ -206,6 +206,13 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     // Nova lógica: Pendentes = Contagem de status 'Pendente' nos agendamentos das próximas 24h
     const servicosPendentes = agendamentos24h.filter(a => a.status === 'Pendente').length;
+    
+    console.log('--- Debug Dashboard ---');
+    console.log('Data Hoje (Brasília):', hoje);
+    console.log('Hora Agora (Brasília):', agoraHora);
+    console.log('Total agendamentos 24h:', agendamentos24h.length);
+    console.log('Serviços Pendentes 24h:', servicosPendentes);
+    console.log('-----------------------');
 
     res.json({
       atendimentosHoje: statsHoje.total_dia || 0,
