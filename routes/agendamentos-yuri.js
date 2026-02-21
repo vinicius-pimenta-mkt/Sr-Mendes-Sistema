@@ -133,4 +133,26 @@ router.delete('/:id', verifyToken, async (req, res) => {
   }
 });
 
+// Bloquear horários em lote (Yuri)
+router.post('/bloquear', verifyToken, async (req, res) => {
+  try {
+    const { bloqueios } = req.body;
+    if (!bloqueios || !Array.isArray(bloqueios)) {
+      return res.status(400).json({ error: 'Formato inválido. Esperado um array de bloqueios.' });
+    }
+    
+    for (const b of bloqueios) {
+      await query(
+        `INSERT INTO agendamentos_yuri (cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['Bloqueio de Agenda', 'Horário Bloqueado', b.data, b.hora, 'Bloqueado', 0, '-', 'Bloqueio gerado pelo sistema']
+      );
+    }
+    res.status(201).json({ message: 'Horários bloqueados com sucesso' });
+  } catch (error) {
+    console.error('Erro ao bloquear horários:', error);
+    res.status(500).json({ error: 'Erro ao bloquear horários' });
+  }
+});
+
 export default router;
