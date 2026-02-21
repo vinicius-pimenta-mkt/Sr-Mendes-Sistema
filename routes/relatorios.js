@@ -4,9 +4,8 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
-// Função para obter data e hora em Brasília (GMT-3) com precisão
+// Função para obter data e hora em Brasília (GMT-3)
 function getHojeEAgoraEmBrasilia() {
-  // Cria um formatter para Brasília
   const formatter = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo',
     year: 'numeric',
@@ -14,7 +13,6 @@ function getHojeEAgoraEmBrasilia() {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
     hour12: false
   });
 
@@ -80,7 +78,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       dFim = hoje;
     }
     
-    // 1. Serviços por Barbeiro (Unificação para o Gráfico Geral)
+    // 1. Serviços por Barbeiro
     let rawServices = [];
     if (barber === 'Geral' || barber === 'Lucas') {
       const sLucas = await all(`
@@ -101,7 +99,6 @@ router.get('/resumo', verifyToken, async (req, res) => {
       rawServices = [...rawServices, ...sYuri];
     }
 
-    // Agrupamento para o Frontend
     const serviceMap = {};
     rawServices.forEach(s => {
       if (!serviceMap[s.servico]) {
@@ -160,7 +157,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       quantidade: p.qty
     }));
 
-    // 4. Lista de Agendamentos (Tabela Detalhada)
+    // 4. Lista de Agendamentos
     let listQuery = "";
     if (barber === 'Geral') {
       listQuery = `SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, barber FROM (SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, 'Lucas' as barber, status FROM agendamentos UNION ALL SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, 'Yuri' as barber, status FROM agendamentos_yuri) WHERE data BETWEEN ? AND ? AND status = 'Confirmado' ORDER BY data DESC, hora DESC`;
@@ -193,7 +190,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const { hoje, agoraHora, amanha } = getHojeEAgoraEmBrasilia();
 
-    console.log(`[Dashboard] Processando - Hoje: ${hoje}, Agora: ${agoraHora}, Amanhã: ${amanha}`);
+    console.log(`[Dashboard] Brasília - Hoje: ${hoje}, Agora: ${agoraHora}, Amanhã: ${amanha}`);
 
     // ============================================================================
     // BUSCA TODOS OS AGENDAMENTOS DE HOJE E AMANHÃ (SEM FILTRO DE STATUS)
@@ -210,60 +207,65 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     `, [hoje, amanha, hoje, amanha]);
 
     console.log(`[Dashboard] Total de agendamentos (hoje + amanhã): ${todosAgendamentos.length}`);
-    console.log(`[Dashboard] Detalhes: ${JSON.stringify(todosAgendamentos.map(a => ({ cliente: a.cliente_nome, data: a.data, hora: a.hora })))}`);
 
     // ============================================================================
-    // FILTRA AGENDAMENTOS POR PERÍODO
+    // SEPARA AGENDAMENTOS POR PERÍODO
     // ============================================================================
     
     // Agendamentos de hoje que já passaram
     const agendamentosPassadosHoje = todosAgendamentos.filter(a => 
       a.data === hoje && a.hora < agoraHora
     );
-    console.log(`[Dashboard] Agendamentos passados hoje: ${agendamentosPassadosHoje.length}`);
 
     // Agendamentos de hoje que ainda vão acontecer
     const agendamentosFuturosHoje = todosAgendamentos.filter(a => 
       a.data === hoje && a.hora >= agoraHora
     );
-    console.log(`[Dashboard] Agendamentos futuros hoje: ${agendamentosFuturosHoje.length}`);
 
     // Agendamentos de amanhã
     const agendamentosAmanha = todosAgendamentos.filter(a => 
       a.data === amanha
     );
-    console.log(`[Dashboard] Agendamentos amanhã: ${agendamentosAmanha.length}`);
 
     // ============================================================================
-    // CALCULA ESTATÍSTICAS COM BASE NOS FILTROS ACIMA
+    // CALCULA ESTATÍSTICAS - DADOS "MASTIGADOS" PARA O FRONTEND
     // ============================================================================
     
-    // Total de agendamentos de hoje (00:00 às 23:59)
-    const atendimentosHoje = agendamentosPassadosHoje.length + agendamentosFuturosHoje.length;
-    console.log(`[Dashboard] Total agendamentos hoje: ${atendimentosHoje}`);
+    // 1. Total de agendamentos de hoje (00:00 às 23:59)
+    const total_hoje = agendamentosPassadosHoje.length + agendamentosFuturosHoje.length;
 
-    // Serviços realizados = agendamentos que já passaram
-    const servicosRealizados = agendamentosPassadosHoje.length;
-    console.log(`[Dashboard] Serviços Realizados: ${servicosRealizados}`);
+    // 2. Serviços realizados (agendamentos de hoje que já passaram)
+    const servicos_realizados = agendamentosPassadosHoje.length;
 
-    // Receita do dia = soma dos preços dos agendamentos que já passaram
-    const receitaDia = agendamentosPassadosHoje.reduce((sum, a) => sum + (a.preco || 0), 0) / 100;
-    console.log(`[Dashboard] Receita do Dia: R$ ${receitaDia}`);
+    // 3. Receita do dia (soma dos preços dos agendamentos que já passaram)
+    const receita_dia = agendamentosPassadosHoje.reduce((sum, a) => sum + (a.preco || 0), 0) / 100;
 
-    // Aguardando = agendamentos futuros (hoje + amanhã)
-    const agendamentos24h = [...agendamentosFuturosHoje, ...agendamentosAmanha];
-    const servicosAguardando = agendamentos24h.length;
-    console.log(`[Dashboard] Agendamentos nas próximas 24h (Aguardando): ${servicosAguardando}`);
+    // 4. Agendamentos aguardando (próximas 24h: hoje futuro + amanhã)
+    const agendamentos_futuros = [...agendamentosFuturosHoje, ...agendamentosAmanha];
+    const aguardando = agendamentos_futuros.length;
 
+    console.log(`[Dashboard] total_hoje: ${total_hoje}, servicos_realizados: ${servicos_realizados}, receita_dia: ${receita_dia}, aguardando: ${aguardando}`);
+
+    // ============================================================================
+    // PREPARA LISTA DE AGENDAMENTOS FUTUROS COM ETIQUETA DE DATA
+    // ============================================================================
+    const agendamentos_com_etiqueta = agendamentos_futuros.map(a => ({
+      ...a,
+      data_label: a.data === hoje ? 'Hoje' : a.data === amanha ? 'Amanhã' : a.data
+    }));
+
+    // ============================================================================
+    // RESPOSTA JSON - DADOS PRONTOS PARA EXIBIÇÃO
+    // ============================================================================
     res.json({
-      atendimentosHoje,
-      receitaDia,
-      servicosRealizados,
-      servicosAguardando,
-      agendamentos: agendamentos24h,
-      agoraHora,
+      total_hoje,
+      servicos_realizados,
+      receita_dia,
+      aguardando,
+      agendamentos: agendamentos_com_etiqueta,
       hoje,
-      amanha
+      amanha,
+      agora: agoraHora
     });
   } catch (error) {
     console.error('Erro em /dashboard:', error);
