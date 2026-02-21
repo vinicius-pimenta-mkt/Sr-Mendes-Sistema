@@ -9,12 +9,12 @@ services:
       JWT_SECRET: "sua_chave_secreta"
       ADMIN_USER: "adminbm"
       ADMIN_PASS: "belmasc2026"
-      DATABASE_URL: "sqlite:///app/database.sqlite"
+      # Removi a URL do SQLite daqui porque o seu código já define o caminho no database.js
     volumes:
-      - ./database.sqlite:/app/database.sqlite
+      # Mapeando a pasta inteira do banco de dados para evitar problemas de caminho de arquivo
+      - ./database_data:/app/src/database
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.srmendes.rule=Host(`api.unvgroup.tech`)"
       - "traefik.http.routers.srmendes.entrypoints=websecure"
       - "traefik.http.routers.srmendes.tls.certresolver=myresolver"
-
