@@ -142,20 +142,23 @@ router.get('/resumo', verifyToken, async (req, res) => {
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
     const agora = new Date();
-    const hoje = agora.toISOString().split('T')[0];
+    const hoje = agora.toISOString().split('T')[0]; // Ex: '2026-02-20'
     const amanha = new Date(agora);
     amanha.setDate(amanha.getDate() + 1);
-    const amanhaStr = amanha.toISOString().split('T')[0];
+    const amanhaStr = amanha.toISOString().split('T')[0]; // Ex: '2026-02-21'
     
-    // Hora atual em formato HH:MM (24h)
+    // Hora atual em formato HH:MM (24h) - Ex: '14:30'
     const agoraHora = agora.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+
+    console.log(`[Dashboard Debug] Server Time: ${agora.toISOString()}`);
+    console.log(`[Dashboard Debug] Hoje (str): ${hoje}, Amanhã (str): ${amanhaStr}, Hora Atual (str): ${agoraHora}`);
 
     // ============================================================================
     // PARTE 1: DADOS HISTÓRICOS (Hoje de 00:00 até agora)
     // ============================================================================
     
-    // Total de agendamentos de hoje (independente da hora) - TODOS os agendamentos do dia
-    const totalHoje = await get(`
+    // Total de agendamentos de hoje (00:00 às 23:59) - TODOS os agendamentos do dia
+    const totalHojeResult = await get(`
       SELECT COUNT(*) as total_dia
       FROM (
         SELECT id FROM agendamentos WHERE data = ? AND status != 'Cancelado'
@@ -163,51 +166,60 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         SELECT id FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
       )
     `, [hoje, hoje]);
+    const atendimentosHoje = totalHojeResult ? totalHojeResult.total_dia : 0;
+    console.log(`[Dashboard Debug] Total de agendamentos hoje (00:00-23:59): ${atendimentosHoje}`);
 
-    // Agendamentos realizados (hora já passou) e receita confirmada
-    const statsRealizados = await get(`
+    // Agendamentos realizados (hora já passou) e receita confirmada (00:00 até agora)
+    // Usamos CAST para garantir comparação correta de strings de hora
+    const statsRealizadosResult = await get(`
       SELECT 
         COUNT(*) as realizados,
         SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
       FROM (
-        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado' AND hora < ?
+        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado' AND CAST(hora AS TEXT) < ?
         UNION ALL
-        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado' AND hora < ?
+        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado' AND CAST(hora AS TEXT) < ?
       )
     `, [hoje, agoraHora, hoje, agoraHora]);
+    const servicosRealizados = statsRealizadosResult ? statsRealizadosResult.realizados : 0;
+    const receitaDia = statsRealizadosResult ? (statsRealizadosResult.receita_realizada || 0) / 100 : 0;
+    console.log(`[Dashboard Debug] Serviços Realizados (00:00-agora): ${servicosRealizados}, Receita (00:00-agora): ${receitaDia}`);
 
     // ============================================================================
     // PARTE 2: DADOS FUTUROS (Próximas 24h a partir de agora)
     // ============================================================================
     // Busca todos os agendamentos de hoje e amanhã (exceto cancelados)
     const todosAgendamentos = await all(`
-      SELECT * FROM (
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
-        WHERE status != 'Cancelado' AND (data = ? OR data = ?)
-        UNION ALL
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
-        WHERE status != 'Cancelado' AND (data = ? OR data = ?)
-      ) ORDER BY data ASC, hora ASC
+      SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
+      WHERE status != 'Cancelado' AND (data = ? OR data = ?)
+      UNION ALL
+      SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
+      WHERE status != 'Cancelado' AND (data = ? OR data = ?)
+      ORDER BY data ASC, hora ASC
     `, [hoje, amanhaStr, hoje, amanhaStr]);
 
+    console.log(`[Dashboard Debug] Total de agendamentos (hoje + amanha, não cancelados): ${todosAgendamentos.length}`);
+
     // Filtra apenas os agendamentos FUTUROS (próximas 24h a partir de agora)
+    // Lógica em JavaScript para garantir precisão
     const agendamentos24h = todosAgendamentos.filter(a => {
-      // Para hoje: hora DEVE SER ESTRITAMENTE MAIOR que a hora atual
-      if (a.data === hoje) {
-        return a.hora > agoraHora;
-      }
-      // Para amanhã: hora DEVE SER MENOR ou IGUAL que a hora atual (completa 24h)
-      if (a.data === amanhaStr) {
-        return a.hora <= agoraHora;
-      }
-      return false;
+      const agendamentoDateTime = new Date(`${a.data}T${a.hora}:00`); // Cria um objeto Date para comparação
+      
+      // Compara o agendamento com o momento 'agora'
+      const isFuture = agendamentoDateTime > agora;
+
+      console.log(`[Dashboard Debug] Agendamento: ${a.cliente_nome} ${a.data} ${a.hora} | isFuture: ${isFuture}`);
+      return isFuture;
     });
 
+    const servicosAguardando = agendamentos24h.length;
+    console.log(`[Dashboard Debug] Agendamentos nas próximas 24h (futuros): ${servicosAguardando}`);
+
     res.json({
-      atendimentosHoje: totalHoje.total_dia || 0,
-      receitaDia: (statsRealizados.receita_realizada || 0) / 100,
-      servicosRealizados: statsRealizados.realizados || 0,
-      servicosAguardando: agendamentos24h.length,
+      atendimentosHoje,
+      receitaDia,
+      servicosRealizados,
+      servicosAguardando,
       agendamentos: agendamentos24h,
       agoraHora,
       hoje,
