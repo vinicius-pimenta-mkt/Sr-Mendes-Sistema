@@ -62,80 +62,11 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const hoje = `${map.year}-${map.month}-${map.day}`;
     const agoraHora = `${map.hour}:${map.minute}`;
 
-    /* ==============================
-       1️⃣ TOTAL DE AGENDAMENTOS HOJE
-    ============================== */
-    const totalHoje = await get(`
-      SELECT COUNT(*) as total
-      FROM (
-        SELECT data FROM agendamentos 
-        WHERE data = ? AND status != 'Cancelado'
-        UNION ALL
-        SELECT data FROM agendamentos_yuri 
-        WHERE data = ? AND status != 'Cancelado'
-      )
-    `, [hoje, hoje]);
+    const HORA_ABERTURA = "09:00";
 
-    /* ==============================
-       2️⃣ SERVIÇOS REALIZADOS
-       Hoje + Confirmado ou Pendente
-       + hora <= agora
-    ============================== */
-    const realizadosHoje = await get(`
-      SELECT COUNT(*) as total
-      FROM (
-        SELECT hora FROM agendamentos
-        WHERE data = ?
-          AND status IN ('Confirmado','Pendente')
-          AND hora <= ?
-        UNION ALL
-        SELECT hora FROM agendamentos_yuri
-        WHERE data = ?
-          AND status IN ('Confirmado','Pendente')
-          AND hora <= ?
-      )
-    `, [hoje, agoraHora, hoje, agoraHora]);
-
-    /* ==============================
-       3️⃣ RECEITA DO DIA
-       Confirmado + hora <= agora
-    ============================== */
-    const receitaHoje = await get(`
-      SELECT SUM(preco) as total
-      FROM (
-        SELECT preco, hora FROM agendamentos
-        WHERE data = ?
-          AND status = 'Confirmado'
-          AND hora <= ?
-        UNION ALL
-        SELECT preco, hora FROM agendamentos_yuri
-        WHERE data = ?
-          AND status = 'Confirmado'
-          AND hora <= ?
-      )
-    `, [hoje, agoraHora, hoje, agoraHora]);
-
-    /* ==============================
-       4️⃣ PENDENTES DO DIA INTEIRO
-       Hoje (00:01–23:59)
-    ============================== */
-    const pendentesHoje = await get(`
-      SELECT COUNT(*) as total
-      FROM (
-        SELECT data FROM agendamentos
-        WHERE data = ?
-          AND status = 'Pendente'
-        UNION ALL
-        SELECT data FROM agendamentos_yuri
-        WHERE data = ?
-          AND status = 'Pendente'
-      )
-    `, [hoje, hoje]);
-
-    /* ==============================
-       5️⃣ AGENDAMENTOS FUTUROS (TABELAS)
-       Apenas horários >= agora
-    ============================== */
+    // ==============================
+    // BASE ÚNICA DO DIA (MESMA DA TABELA)
+    // ==============================
     const agendamentosHoje = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber
@@ -149,13 +80,44 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       ORDER BY hora ASC
     `, [hoje, hoje]);
 
+    // ==============================
+    // TABELA (APENAS FUTUROS)
+    // ==============================
     const agendamentosFuturos = agendamentosHoje.filter(a => a.hora >= agoraHora);
 
+    // ==============================
+    // PENDENTES (MESMA BASE DA TABELA)
+    // ==============================
+    const pendentesHoje = agendamentosHoje.filter(a => a.status === 'Pendente').length;
+
+    // ==============================
+    // SERVIÇOS REALIZADOS
+    // Regra:
+    // - status Confirmado ou Pendente
+    // - hora <= agora
+    // - somente após horário de abertura
+    // ==============================
+    let realizadosHoje = 0;
+
+    if (agoraHora >= HORA_ABERTURA) {
+      realizadosHoje = agendamentosHoje.filter(a =>
+        (a.status === 'Confirmado' || a.status === 'Pendente') &&
+        a.hora <= agoraHora
+      ).length;
+    }
+
+    // ==============================
+    // RECEITA DO DIA
+    // ==============================
+    const receitaHoje = agendamentosHoje
+      .filter(a => a.status === 'Confirmado' && a.hora <= agoraHora)
+      .reduce((total, a) => total + (a.preco || 0), 0);
+
     res.json({
-      atendimentosHoje: totalHoje.total || 0,
-      receitaDia: (receitaHoje.total || 0) / 100,
-      servicosRealizados: realizadosHoje.total || 0,
-      servicosAguardando: pendentesHoje.total || 0,
+      atendimentosHoje: agendamentosHoje.length,
+      receitaDia: receitaHoje / 100,
+      servicosRealizados: realizadosHoje,
+      servicosAguardando: pendentesHoje,
       agendamentos: agendamentosFuturos,
       agoraHora,
       hoje
