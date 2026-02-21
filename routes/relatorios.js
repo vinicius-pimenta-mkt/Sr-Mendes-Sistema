@@ -30,44 +30,46 @@ router.get('/resumo', verifyToken, async (req, res) => {
       dFim = hoje.toISOString().split('T')[0];
     }
     
-    // 1. Serviços por Barbeiro (Sempre buscar ambos para comparação no gráfico)
+    // 1. Serviços por Barbeiro (Unificação para o Gráfico Geral)
     let rawServices = [];
-    const sLucas = await all(`
-      SELECT servico, 'Lucas' as barber, COUNT(*) as qty, SUM(COALESCE(preco, 0)) as revenue
-      FROM agendamentos 
-      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
-      GROUP BY servico
-    `, [dIni, dFim]);
-    
-    const sYuri = await all(`
-      SELECT servico, 'Yuri' as barber, COUNT(*) as qty, SUM(COALESCE(preco, 0)) as revenue
-      FROM agendamentos_yuri 
-      WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
-      GROUP BY servico
-    `, [dIni, dFim]);
-    
-    rawServices = [...sLucas, ...sYuri];
+    if (barber === 'Geral' || barber === 'Lucas') {
+      const sLucas = await all(`
+        SELECT servico, 'Lucas' as barber, COUNT(*) as qty
+        FROM agendamentos 
+        WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+        GROUP BY servico
+      `, [dIni, dFim]);
+      rawServices = [...rawServices, ...sLucas];
+    }
+    if (barber === 'Geral' || barber === 'Yuri') {
+      const sYuri = await all(`
+        SELECT servico, 'Yuri' as barber, COUNT(*) as qty
+        FROM agendamentos_yuri 
+        WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
+        GROUP BY servico
+      `, [dIni, dFim]);
+      rawServices = [...rawServices, ...sYuri];
+    }
 
+    // Agrupamento para o Frontend (Estrutura: { service, lucas_qty, yuri_qty, total_qty })
     const serviceMap = {};
     rawServices.forEach(s => {
       if (!serviceMap[s.servico]) {
-        serviceMap[s.servico] = { service: s.servico, lucas_qty: 0, yuri_qty: 0, total_qty: 0, revenue: 0 };
+        serviceMap[s.servico] = { service: s.servico, lucas_qty: 0, yuri_qty: 0, total_qty: 0 };
       }
       if (s.barber === 'Lucas') serviceMap[s.servico].lucas_qty += s.qty;
       else serviceMap[s.servico].yuri_qty += s.qty;
       serviceMap[s.servico].total_qty += s.qty;
-      serviceMap[s.servico].revenue += s.revenue / 100;
     });
 
     const byService = Object.values(serviceMap).sort((a, b) => b.total_qty - a.total_qty);
 
-    // 2. Evolução da Receita (Ajustado para HORA se for Hoje)
+    // 2. Evolução da Receita
     const isToday = dIni === dFim && dIni === hoje.toISOString().split('T')[0];
     let revenueQuery = "";
     let rawRevenue = [];
 
     if (isToday) {
-      // Agrupar por hora
       if (barber === 'Geral') {
         revenueQuery = `SELECT substr(hora, 1, 2) || ':00' as periodo, SUM(COALESCE(preco, 0)) as total FROM (SELECT data, hora, preco, status FROM agendamentos UNION ALL SELECT data, hora, preco, status FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data = ? GROUP BY periodo ORDER BY periodo`;
       } else if (barber === 'Lucas') {
@@ -77,7 +79,6 @@ router.get('/resumo', verifyToken, async (req, res) => {
       }
       rawRevenue = await all(revenueQuery, [dIni]);
     } else {
-      // Agrupar por data
       if (barber === 'Geral') {
         revenueQuery = `SELECT data as periodo, SUM(COALESCE(preco, 0)) as total FROM (SELECT data, preco, status FROM agendamentos UNION ALL SELECT data, preco, status FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY data ORDER BY data`;
       } else if (barber === 'Lucas') {
@@ -109,7 +110,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       quantidade: p.qty
     }));
 
-    // 4. Lista de Agendamentos
+    // 4. Lista de Agendamentos (Tabela Detalhada)
     let listQuery = "";
     if (barber === 'Geral') {
       listQuery = `SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, barber FROM (SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, 'Lucas' as barber, status FROM agendamentos UNION ALL SELECT cliente_nome, servico, data, hora, preco, forma_pagamento, 'Yuri' as barber, status FROM agendamentos_yuri) WHERE data BETWEEN ? AND ? AND status = 'Confirmado' ORDER BY data DESC, hora DESC`;
@@ -123,11 +124,11 @@ router.get('/resumo', verifyToken, async (req, res) => {
     // 5. Top Clientes
     let clientsQuery = "";
     if (barber === 'Geral') {
-      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM (SELECT cliente_nome, preco, status, data FROM agendamentos UNION ALL SELECT cliente_nome, preco, status, data FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
+      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM (SELECT cliente_nome, preco, status, data FROM agendamentos UNION ALL SELECT cliente_nome, preco, status, data FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY spent DESC LIMIT 10`;
     } else if (barber === 'Lucas') {
-      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
+      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM agendamentos WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY spent DESC LIMIT 10`;
     } else {
-      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY visits DESC LIMIT 10`;
+      clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY spent DESC LIMIT 10`;
     }
     const topClients = await all(clientsQuery, [dIni, dFim]);
 
@@ -140,46 +141,53 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
-    // Ajuste para fuso horário de Brasília (UTC-3)
     const agora = new Date();
-    const hoje = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(agora).split('/').reverse().join('-');
-    const agoraHora = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour12: false, hour: '2-digit', minute: '2-digit' }).format(agora);
+    const hoje = agora.toISOString().split('T')[0];
+    const amanha = new Date(agora);
+    amanha.setDate(amanha.getDate() + 1);
+    const amanhaStr = amanha.toISOString().split('T')[0];
+    
+    const agoraHora = agora.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // Todos os agendamentos de hoje
-    const data = await all(`
+    // BUSCA DIRETA DA AGENDA (TODOS OS STATUS EXCETO CANCELADO)
+    const todosAgendamentos = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
-        WHERE status != 'Cancelado' AND data = ?
+        WHERE status != 'Cancelado' AND (data = ? OR data = ?)
         UNION ALL
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
-        WHERE status != 'Cancelado' AND data = ?
-      ) ORDER BY hora ASC
-    `, [hoje, hoje]);
+        WHERE status != 'Cancelado' AND (data = ? OR data = ?)
+      ) ORDER BY data ASC, hora ASC
+    `, [hoje, amanhaStr, hoje, amanhaStr]);
 
-    // Estatísticas baseadas nos novos requisitos:
-    // 1. Total de Agendamentos: Todos do dia (09:00 às 19:00)
-    // 2. Receita do Dia: Confirmados das horas anteriores (09:00 à hora atual)
-    // 3. Serviços Realizados: Confirmados das horas anteriores (09:00 à hora atual)
-    // 4. Aguardando: Futuros (hora atual às 19:00)
-    const stats = await get(`
+    // FILTRAGEM DE PRÓXIMAS 24 HORAS PARA AS TABELAS
+    const agendamentos24h = todosAgendamentos.filter(a => {
+      if (a.data === hoje) return a.hora >= agoraHora;
+      if (a.data === amanhaStr) return a.hora < agoraHora;
+      return false;
+    });
+
+    // ESTATÍSTICAS BASEADAS NO TEMPO REAL DE HOJE
+    // Regra específica: Aguardando = Confirmados ou Pendentes de AGORA até 19:00 de HOJE
+    const statsHoje = await get(`
       SELECT 
         COUNT(*) as total_dia,
-        SUM(CASE WHEN status = 'Confirmado' AND hora < ? THEN COALESCE(preco, 0) ELSE 0 END) as revenue_realized,
-        COUNT(CASE WHEN status = 'Confirmado' AND hora < ? THEN 1 END) as qty_realized,
-        COUNT(CASE WHEN status != 'Cancelado' AND hora >= ? THEN 1 END) as qty_waiting
+        SUM(CASE WHEN hora < ? THEN 1 ELSE 0 END) as realizados,
+        SUM(CASE WHEN hora >= ? AND hora <= '19:00' AND status IN ('Confirmado', 'Pendente') THEN 1 ELSE 0 END) as aguardando_ate_19h,
+        SUM(CASE WHEN status = 'Confirmado' AND hora < ? THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
       FROM (
-        SELECT status, preco, data, hora FROM agendamentos WHERE data = ?
+        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
         UNION ALL
-        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ?
+        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
       )
     `, [agoraHora, agoraHora, agoraHora, hoje, hoje]);
 
     res.json({
-      atendimentosHoje: stats.total_dia || 0,
-      receitaDia: (stats.revenue_realized || 0) / 100,
-      servicosRealizados: stats.qty_realized || 0,
-      aguardando: stats.qty_waiting || 0,
-      agendamentos: data,
+      atendimentosHoje: statsHoje.total_dia || 0,
+      receitaDia: (statsHoje.receita_realizada || 0) / 100,
+      servicosRealizados: statsHoje.realizados || 0,
+      servicosAguardando: statsHoje.aguardando_ate_19h || 0, // Regra até 19:00
+      agendamentos: agendamentos24h, // Mantemos 24h para as tabelas de próximos
       agoraHora
     });
   } catch (error) {
