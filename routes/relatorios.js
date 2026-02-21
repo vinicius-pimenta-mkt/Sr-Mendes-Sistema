@@ -1,47 +1,9 @@
 import express from 'express';
-import { all, get } from '../database/database.js';
+import { all } from '../database/database.js';
 import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
-/* ======================================================
-   RESUMO (MANTIDO ORIGINAL - NÃO ALTERADO)
-====================================================== */
-router.get('/resumo', verifyToken, async (req, res) => {
-  try {
-    const { periodo = 'mes', data_inicio, data_fim, barber = 'Geral' } = req.query;
-    let dIni, dFim;
-    const hoje = new Date();
-
-    if (data_inicio && data_fim) {
-      dIni = data_inicio;
-      dFim = data_fim;
-    } else {
-      let dataInicio;
-      switch (periodo) {
-        case 'hoje': dataInicio = hoje; break;
-        case 'ontem': dataInicio = new Date(); dataInicio.setDate(hoje.getDate() - 1); break;
-        case 'semana': dataInicio = new Date(); dataInicio.setDate(hoje.getDate() - 7); break;
-        case 'ano': dataInicio = new Date(); dataInicio.setFullYear(hoje.getFullYear() - 1); break;
-        default: dataInicio = new Date(); dataInicio.setMonth(hoje.getMonth() - 1);
-      }
-      dIni = dataInicio.toISOString().split('T')[0];
-      dFim = hoje.toISOString().split('T')[0];
-    }
-
-    // (mantido igual ao seu código original)
-    // ...
-    res.json({ message: "Resumo mantido como estava." });
-
-  } catch (error) {
-    console.error('Erro em /resumo:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
-  }
-});
-
-/* ======================================================
-   DASHBOARD CORRIGIDO
-====================================================== */
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
 
@@ -62,11 +24,17 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const hoje = `${map.year}-${map.month}-${map.day}`;
     const agoraHora = `${map.hour}:${map.minute}`;
 
-    const HORA_ABERTURA = "09:00";
+    const horaParaMinutos = (hora) => {
+      const [h, m] = hora.split(':').map(Number);
+      return h * 60 + m;
+    };
 
-    // ==============================
-    // BASE ÚNICA DO DIA (MESMA DA TABELA)
-    // ==============================
+    const agoraMin = horaParaMinutos(agoraHora);
+    const aberturaMin = horaParaMinutos("09:00");
+
+    /* ======================================================
+       BASE ÚNICA DO DIA (MESMA DA TABELA)
+    ====================================================== */
     const agendamentosHoje = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber
@@ -80,37 +48,48 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       ORDER BY hora ASC
     `, [hoje, hoje]);
 
-    // ==============================
-    // TABELA (APENAS FUTUROS)
-    // ==============================
-    const agendamentosFuturos = agendamentosHoje.filter(a => a.hora >= agoraHora);
+    /* ======================================================
+       TABELA (APENAS FUTUROS)
+    ====================================================== */
+    const agendamentosFuturos = agendamentosHoje.filter(a =>
+      horaParaMinutos(a.hora) >= agoraMin
+    );
 
-    // ==============================
-    // PENDENTES (MESMA BASE DA TABELA)
-    // ==============================
-    const pendentesHoje = agendamentosHoje.filter(a => a.status === 'Pendente').length;
+    /* ======================================================
+       PENDENTES (MESMA BASE)
+    ====================================================== */
+    const pendentesHoje = agendamentosHoje.filter(a =>
+      a.status === 'Pendente'
+    ).length;
 
-    // ==============================
-    // SERVIÇOS REALIZADOS
-    // Regra:
-    // - status Confirmado ou Pendente
-    // - hora <= agora
-    // - somente após horário de abertura
-    // ==============================
+    /* ======================================================
+       REALIZADOS
+    ====================================================== */
     let realizadosHoje = 0;
 
-    if (agoraHora >= HORA_ABERTURA) {
-      realizadosHoje = agendamentosHoje.filter(a =>
-        (a.status === 'Confirmado' || a.status === 'Pendente') &&
-        a.hora <= agoraHora
-      ).length;
+    if (agoraMin >= aberturaMin) {
+      realizadosHoje = agendamentosHoje.filter(a => {
+        const horaMin = horaParaMinutos(a.hora);
+        return (
+          (a.status === 'Confirmado' || a.status === 'Pendente') &&
+          horaMin <= agoraMin
+        );
+      }).length;
     }
 
-    // ==============================
-    // RECEITA DO DIA
-    // ==============================
+    /* ======================================================
+       RECEITA DO DIA
+       Confirmado + Pendente
+       que já passaram do horário
+    ====================================================== */
     const receitaHoje = agendamentosHoje
-      .filter(a => a.status === 'Confirmado' && a.hora <= agoraHora)
+      .filter(a => {
+        const horaMin = horaParaMinutos(a.hora);
+        return (
+          (a.status === 'Confirmado' || a.status === 'Pendente') &&
+          horaMin <= agoraMin
+        );
+      })
       .reduce((total, a) => total + (a.preco || 0), 0);
 
     res.json({
