@@ -4,6 +4,13 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
+// Função auxiliar para deixar apenas números no telefone
+const limparTelefone = (telefone) => {
+  if (!telefone || typeof telefone !== 'string') return null;
+  const apenasNumeros = telefone.replace(/\D/g, '');
+  return apenasNumeros.length > 0 ? apenasNumeros : null;
+};
+
 // Listar todos os agendamentos
 router.get('/', verifyToken, async (req, res) => {
   try {
@@ -52,18 +59,26 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
     }
 
+    // Limpa o telefone para salvar apenas números e trata o ID
+    const telefoneLimpo = limparTelefone(cliente_telefone);
+    const safeClienteId = cliente_id || null;
+
     const result = await query(
       'INSERT INTO agendamentos (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes]
+      [safeClienteId, cliente_nome, telefoneLimpo, servico, data, hora, status, preco, forma_pagamento, observacoes]
     );
 
-    // Se for confirmado, tenta atualizar última visita do assinante
+    // Bloco isolado: Se for confirmado, tenta atualizar última visita do assinante
     if (status === 'Confirmado') {
-      const dataVisita = `${data.split('-').reverse().join('/')} ${hora}`;
-      if (cliente_telefone) {
-        await query('UPDATE assinantes SET ultima_visita = ? WHERE telefone = ? OR nome = ?', [dataVisita, cliente_telefone, cliente_nome]);
-      } else {
-        await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
+      try {
+        const dataVisita = `${data.split('-').reverse().join('/')} ${hora}`;
+        if (telefoneLimpo) {
+          await query('UPDATE assinantes SET ultima_visita = ? WHERE telefone = ? OR nome = ?', [dataVisita, telefoneLimpo, cliente_nome]);
+        } else {
+          await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
+        }
+      } catch (assinanteError) {
+        console.error('Aviso: Erro ao atualizar a visita do assinante (ignorado):', assinanteError);
       }
     }
     
@@ -80,22 +95,31 @@ router.put('/:id', verifyToken, async (req, res) => {
     const { id } = req.params;
     const { cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
 
+    // Limpa o telefone para salvar apenas números
+    const telefoneLimpo = limparTelefone(cliente_telefone);
+
     await query(
       'UPDATE agendamentos SET cliente_nome=?, cliente_telefone=?, servico=?, data=?, hora=?, status=?, preco=?, forma_pagamento=?, observacoes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-      [cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes, id]
+      [cliente_nome, telefoneLimpo, servico, data, hora, status, preco, forma_pagamento, observacoes, id]
     );
 
+    // Bloco isolado: Tenta atualizar a última visita do assinante
     if (status === 'Confirmado') {
-      const dataVisita = `${data.split('-').reverse().join('/')} ${hora}`;
-      if (cliente_telefone) {
-        await query('UPDATE assinantes SET ultima_visita = ? WHERE telefone = ? OR nome = ?', [dataVisita, cliente_telefone, cliente_nome]);
-      } else {
-        await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
+      try {
+        const dataVisita = `${data.split('-').reverse().join('/')} ${hora}`;
+        if (telefoneLimpo) {
+          await query('UPDATE assinantes SET ultima_visita = ? WHERE telefone = ? OR nome = ?', [dataVisita, telefoneLimpo, cliente_nome]);
+        } else {
+          await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
+        }
+      } catch (assinanteError) {
+        console.error('Aviso: Erro ao atualizar a visita do assinante (ignorado):', assinanteError);
       }
     }
     
     res.json({ message: 'Agendamento atualizado' });
   } catch (error) {
+    console.error('Erro ao atualizar agendamento:', error);
     res.status(500).json({ error: 'Erro ao atualizar agendamento' });
   }
 });
