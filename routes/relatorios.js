@@ -141,7 +141,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
-    // Obter data e hora em fuso horário de Brasília (America/Sao_Paulo)
+    // Obter data e hora em Brasília
     const agora = new Date();
     const formatter = new Intl.DateTimeFormat('pt-BR', {
       timeZone: 'America/Sao_Paulo',
@@ -153,13 +153,14 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       second: '2-digit',
       hour12: false
     });
-    
+
     const parts = formatter.formatToParts(agora);
     const map = Object.fromEntries(parts.map(p => [p.type, p.value]));
+
     const hoje = `${map.year}-${map.month}-${map.day}`;
     const agoraHora = `${map.hour}:${map.minute}`;
-    
-    // Calcular amanhã em Brasília
+
+    // Calcular amanhã
     const amanhaDate = new Date(agora);
     amanhaDate.setDate(amanhaDate.getDate() + 1);
     const formatterAmanha = new Intl.DateTimeFormat('pt-BR', {
@@ -169,60 +170,97 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       day: '2-digit',
       hour12: false
     });
+
     const partsAmanha = formatterAmanha.formatToParts(amanhaDate);
     const mapAmanha = Object.fromEntries(partsAmanha.map(p => [p.type, p.value]));
     const amanhaStr = `${mapAmanha.year}-${mapAmanha.month}-${mapAmanha.day}`;
 
-    // BUSCA DIRETA DA AGENDA (TODOS OS STATUS EXCETO CANCELADO)
+    // ================================
+    // BUSCA ORIGINAL (HOJE + AMANHÃ)
+    // ================================
     const todosAgendamentos = await all(`
       SELECT * FROM (
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
+        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber 
+        FROM agendamentos 
         WHERE status != 'Cancelado' AND (data = ? OR data = ?)
         UNION ALL
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
+        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber 
+        FROM agendamentos_yuri 
         WHERE status != 'Cancelado' AND (data = ? OR data = ?)
-      ) ORDER BY data ASC, hora ASC
+      )
+      ORDER BY data ASC, hora ASC
     `, [hoje, amanhaStr, hoje, amanhaStr]);
 
-    // FILTRAGEM DE PRÓXIMAS 24 HORAS PARA AS TABELAS
+    // ================================
+    // MESMA LÓGICA DA TABELA (24h)
+    // ================================
     const agendamentos24h = todosAgendamentos.filter(a => {
       if (a.data === hoje) return a.hora >= agoraHora;
       if (a.data === amanhaStr) return a.hora < agoraHora;
       return false;
     });
 
-    // ESTATÍSTICAS BASEADAS NO TEMPO REAL DE HOJE
-    const statsHoje = await get(`
-      SELECT 
-        COUNT(*) as total_dia,
-        SUM(CASE WHEN hora < ? THEN 1 ELSE 0 END) as realizados,
-        SUM(CASE WHEN status = 'Confirmado' AND hora < ? THEN COALESCE(preco, 0) ELSE 0 END) as receita_realizada
-      FROM (
-        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
-        UNION ALL
-        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
-      )
-    `, [agoraHora, agoraHora, hoje, hoje]);
+    // ====================================
+    // 🔵 PENDENTES (BASE EXATA DA TABELA)
+    // ====================================
+    const servicosPendentes = agendamentos24h.filter(a =>
+      a.status && a.status.trim().toLowerCase() === 'pendente'
+    ).length;
 
-    // Lógica solicitada: Pendentes = Soma dos agendamentos com status 'Pendente' de Lucas e Yuri nas próximas 24h
-    const servicosPendentes = agendamentos24h.filter(a => a.status === 'Pendente').length;
-    
-    console.log('--- Debug Dashboard ---');
-    console.log('Data Hoje (Brasília):', hoje);
-    console.log('Hora Agora (Brasília):', agoraHora);
-    console.log('Total agendamentos 24h:', agendamentos24h.length);
-    console.log('Serviços Pendentes (Aguardando) 24h:', servicosPendentes);
-    console.log('-----------------------');
+    // ====================================
+    // 🔵 SERVIÇOS REALIZADOS
+    // HOJE + (Confirmado ou Pendente)
+    // que já passaram do horário
+    // ====================================
+    const horaParaMinutos = (hora) => {
+      const [h, m] = hora.split(':').map(Number);
+      return h * 60 + m;
+    };
+
+    const agoraMin = horaParaMinutos(agoraHora);
+
+    const realizadosHoje = todosAgendamentos.filter(a => {
+      if (a.data !== hoje) return false;
+
+      const horaMin = horaParaMinutos(a.hora);
+
+      return (
+        (a.status === 'Confirmado' || a.status === 'Pendente') &&
+        horaMin <= agoraMin
+      );
+    }).length;
+
+    // ====================================
+    // 🔵 RECEITA (Confirmado + Pendente já passados)
+    // ====================================
+    const receitaRealizada = todosAgendamentos
+      .filter(a => {
+        if (a.data !== hoje) return false;
+
+        const horaMin = horaParaMinutos(a.hora);
+
+        return (
+          (a.status === 'Confirmado' || a.status === 'Pendente') &&
+          horaMin <= agoraMin
+        );
+      })
+      .reduce((total, a) => total + (a.preco || 0), 0);
+
+    // ====================================
+    // TOTAL DO DIA (mantendo lógica original)
+    // ====================================
+    const totalHoje = todosAgendamentos.filter(a => a.data === hoje).length;
 
     res.json({
-      atendimentosHoje: statsHoje.total_dia || 0,
-      receitaDia: (statsHoje.receita_realizada || 0) / 100,
-      servicosRealizados: statsHoje.realizados || 0,
-      servicosAguardando: servicosPendentes, // Sincronizado com a soma dos pendentes das tabelas abaixo
-      agendamentos: agendamentos24h, 
+      atendimentosHoje: totalHoje,
+      receitaDia: receitaRealizada / 100,
+      servicosRealizados: realizadosHoje,
+      servicosAguardando: servicosPendentes,
+      agendamentos: agendamentos24h,
       agoraHora,
       hoje
     });
+
   } catch (error) {
     console.error('Erro em /dashboard:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
