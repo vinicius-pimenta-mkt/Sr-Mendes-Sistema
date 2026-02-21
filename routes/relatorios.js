@@ -140,8 +140,10 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
-    const hoje = new Date().toISOString().split('T')[0];
-    const agoraHora = new Date().toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    // Ajuste para fuso horário de Brasília (UTC-3)
+    const agora = new Date();
+    const hoje = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(agora).split('/').reverse().join('-');
+    const agoraHora = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour12: false, hour: '2-digit', minute: '2-digit' }).format(agora);
 
     // Todos os agendamentos de hoje
     const data = await all(`
@@ -161,10 +163,10 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     // 4. Aguardando: Futuros (hora atual às 19:00)
     const stats = await get(`
       SELECT 
-        COUNT(CASE WHEN hora >= '09:00' AND hora <= '19:00' THEN 1 END) as total_dia,
-        SUM(CASE WHEN status = 'Confirmado' AND hora >= '09:00' AND hora < ? THEN COALESCE(preco, 0) ELSE 0 END) as revenue_realized,
-        COUNT(CASE WHEN status = 'Confirmado' AND hora >= '09:00' AND hora < ? THEN 1 END) as qty_realized,
-        COUNT(CASE WHEN status != 'Cancelado' AND hora >= ? AND hora <= '19:00' THEN 1 END) as qty_waiting
+        COUNT(*) as total_dia,
+        SUM(CASE WHEN status = 'Confirmado' AND hora < ? THEN COALESCE(preco, 0) ELSE 0 END) as revenue_realized,
+        COUNT(CASE WHEN status = 'Confirmado' AND hora < ? THEN 1 END) as qty_realized,
+        COUNT(CASE WHEN status != 'Cancelado' AND hora >= ? THEN 1 END) as qty_waiting
       FROM (
         SELECT status, preco, data, hora FROM agendamentos WHERE data = ?
         UNION ALL
