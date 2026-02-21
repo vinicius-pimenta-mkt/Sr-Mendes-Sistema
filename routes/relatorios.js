@@ -4,11 +4,25 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
+// Função auxiliar para obter a hora atual em Brasília (GMT-3)
+const getBrasiliaTime = () => {
+  const agora = new Date();
+  // Ajusta para o fuso horário de Brasília (UTC-3)
+  const brasiliaOffset = -3;
+  const utc = agora.getTime() + (agora.getTimezoneOffset() * 60000);
+  const dataBrasilia = new Date(utc + (3600000 * brasiliaOffset));
+  
+  const dataStr = dataBrasilia.toISOString().split('T')[0];
+  const horaStr = dataBrasilia.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  
+  return { dataStr, horaStr, dataBrasilia };
+};
+
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
     const { periodo = 'mes', data_inicio, data_fim, barber = 'Geral' } = req.query;
     let dIni, dFim;
-    const hoje = new Date();
+    const { dataStr: hojeStr, dataBrasilia: hoje } = getBrasiliaTime();
     
     if (data_inicio && data_fim) {
       dIni = data_inicio;
@@ -18,16 +32,16 @@ router.get('/resumo', verifyToken, async (req, res) => {
       switch (periodo) {
         case 'hoje': dataInicio = hoje; break;
         case 'ontem': 
-          dataInicio = new Date(); dataInicio.setDate(hoje.getDate() - 1); break;
+          dataInicio = new Date(hoje); dataInicio.setDate(hoje.getDate() - 1); break;
         case 'semana': 
-          dataInicio = new Date(); dataInicio.setDate(hoje.getDate() - 7); break;
+          dataInicio = new Date(hoje); dataInicio.setDate(hoje.getDate() - 7); break;
         case 'ano': 
-          dataInicio = new Date(); dataInicio.setFullYear(hoje.getFullYear() - 1); break;
+          dataInicio = new Date(hoje); dataInicio.setFullYear(hoje.getFullYear() - 1); break;
         default: // mes
-          dataInicio = new Date(); dataInicio.setMonth(hoje.getMonth() - 1);
+          dataInicio = new Date(hoje); dataInicio.setMonth(hoje.getMonth() - 1);
       }
       dIni = dataInicio.toISOString().split('T')[0];
-      dFim = hoje.toISOString().split('T')[0];
+      dFim = hojeStr;
     }
     
     // 1. Serviços por Barbeiro
@@ -64,8 +78,8 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
     const byService = Object.values(serviceMap).sort((a, b) => b.total_qty - a.total_qty);
 
-    // 2. Evolução da Receita (Ajustado para HORA se for Hoje)
-    const isToday = dIni === dFim && dIni === hoje.toISOString().split('T')[0];
+    // 2. Evolução da Receita
+    const isToday = dIni === dFim && dIni === hojeStr;
     let revenueQuery = "";
     let rawRevenue = [];
 
@@ -121,7 +135,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
     }
     const agendamentos = await all(listQuery, [dIni, dFim]);
 
-    // 5. Top Clientes (Ordenado por valor gasto DESC)
+    // 5. Top Clientes
     let clientsQuery = "";
     if (barber === 'Geral') {
       clientsQuery = `SELECT cliente_nome as name, COUNT(*) as visits, SUM(COALESCE(preco, 0)) / 100 as spent FROM (SELECT cliente_nome, preco, status, data FROM agendamentos UNION ALL SELECT cliente_nome, preco, status, data FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY cliente_nome ORDER BY spent DESC LIMIT 10`;
@@ -141,16 +155,13 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
-    const hojeData = new Date();
-    const amanhaData = new Date(hojeData);
-    amanhaData.setDate(hojeData.getDate() + 1);
-
-    const hojeStr = hojeData.toISOString().split('T')[0];
+    const { dataStr: hojeStr, horaStr: agoraHora } = getBrasiliaTime();
+    
+    const amanhaData = new Date();
+    amanhaData.setDate(amanhaData.getDate() + 1);
     const amanhaStr = amanhaData.toISOString().split('T')[0];
-    const agoraHora = hojeData.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
     // Buscar agendamentos FUTUROS (daqui pra frente nas próximas 24h)
-    // Filtramos rigorosamente: (Hoje e Hora > Agora) OU (Amanhã e Hora <= Agora)
     const agendamentosFuturos = await all(`
       SELECT * FROM (
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
@@ -172,12 +183,12 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       SELECT 
         COUNT(*) as total,
         SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
-        SUM(CASE WHEN hora < ? AND (status = 'Confirmado' OR status = 'Pendente') THEN 1 ELSE 0 END) as realized,
+        SUM(CASE WHEN hora <= ? THEN 1 ELSE 0 END) as realized,
         SUM(CASE WHEN hora > ? AND status = 'Pendente' THEN 1 ELSE 0 END) as pending_future
       FROM (
-        SELECT status, preco, data, hora FROM agendamentos WHERE data = ?
+        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
         UNION ALL
-        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ?
+        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
       )
     `, [agoraHora, agoraHora, hojeStr, hojeStr]);
 
