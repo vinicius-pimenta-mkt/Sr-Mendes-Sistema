@@ -150,31 +150,10 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     // Hora atual em formato HH:MM (24h)
     const agoraHora = agora.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
-    // BUSCA DA AGENDA: Agendamentos que NÃO foram cancelados para hoje e amanhã
-    const todosAgendamentos = await all(`
-      SELECT * FROM (
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
-        WHERE status != 'Cancelado' AND (data = ? OR data = ?)
-        UNION ALL
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
-        WHERE status != 'Cancelado' AND (data = ? OR data = ?)
-      ) ORDER BY data ASC, hora ASC
-    `, [hoje, amanhaStr, hoje, amanhaStr]);
-
-    // FILTRAGEM RIGOROSA: Apenas agendamentos FUTUROS (próximas 24h)
-    const agendamentos24h = todosAgendamentos.filter(a => {
-      // Se for hoje: hora deve ser ESTRITAMENTE MAIOR que a hora atual
-      if (a.data === hoje) {
-        return a.hora > agoraHora;
-      }
-      // Se for amanhã: hora deve ser MENOR ou IGUAL que a hora atual (completa 24h)
-      if (a.data === amanhaStr) {
-        return a.hora <= agoraHora;
-      }
-      return false;
-    });
-
-    // ESTATÍSTICAS DO DIA: Agendamentos que já passaram (realizados)
+    // ============================================================================
+    // PARTE 1: DADOS HISTÓRICOS (Hoje de 00:00 até agora)
+    // ============================================================================
+    // Total de agendamentos de hoje (independente da hora)
     const statsHoje = await get(`
       SELECT 
         COUNT(*) as total_dia,
@@ -186,6 +165,33 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
       )
     `, [agoraHora, agoraHora, hoje, hoje]);
+
+    // ============================================================================
+    // PARTE 2: DADOS FUTUROS (Próximas 24h a partir de agora)
+    // ============================================================================
+    // Busca todos os agendamentos de hoje e amanhã (exceto cancelados)
+    const todosAgendamentos = await all(`
+      SELECT * FROM (
+        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
+        WHERE status != 'Cancelado' AND (data = ? OR data = ?)
+        UNION ALL
+        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
+        WHERE status != 'Cancelado' AND (data = ? OR data = ?)
+      ) ORDER BY data ASC, hora ASC
+    `, [hoje, amanhaStr, hoje, amanhaStr]);
+
+    // Filtra apenas os agendamentos FUTUROS (próximas 24h a partir de agora)
+    const agendamentos24h = todosAgendamentos.filter(a => {
+      // Para hoje: hora DEVE SER ESTRITAMENTE MAIOR que a hora atual
+      if (a.data === hoje) {
+        return a.hora > agoraHora;
+      }
+      // Para amanhã: hora DEVE SER MENOR ou IGUAL que a hora atual (completa 24h)
+      if (a.data === amanhaStr) {
+        return a.hora <= agoraHora;
+      }
+      return false;
+    });
 
     res.json({
       atendimentosHoje: statsHoje.total_dia || 0,
