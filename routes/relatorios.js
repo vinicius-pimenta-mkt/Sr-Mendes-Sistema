@@ -181,53 +181,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     console.log(`[Dashboard] Processando com Hoje=${hoje}, Agora=${agoraHora}, Amanhã=${amanha}`);
 
     // ============================================================================
-    // PARTE 1: DADOS HISTÓRICOS (Hoje de 00:00 até agora)
+    // BUSCA TODOS OS AGENDAMENTOS DE HOJE E AMANHÃ (SEM FILTRO DE STATUS)
     // ============================================================================
-    
-    // Total de agendamentos de hoje (00:00 às 23:59) - SEM FILTRO DE STATUS
-    const totalHojeResult = await get(`
-      SELECT COUNT(*) as total_dia
-      FROM (
-        SELECT id FROM agendamentos WHERE data = ?
-        UNION ALL
-        SELECT id FROM agendamentos_yuri WHERE data = ?
-      )
-    `, [hoje, hoje]);
-    const atendimentosHoje = totalHojeResult ? totalHojeResult.total_dia : 0;
-    console.log(`[Dashboard] Total agendamentos hoje (00:00-23:59): ${atendimentosHoje}`);
-
-    // Agendamentos realizados (hora já passou) - SEM FILTRO DE STATUS
-    const servicosRealizadosResult = await get(`
-      SELECT COUNT(*) as realizados
-      FROM (
-        SELECT id FROM agendamentos 
-        WHERE data = ? AND hora < ?
-        UNION ALL
-        SELECT id FROM agendamentos_yuri 
-        WHERE data = ? AND hora < ?
-      )
-    `, [hoje, agoraHora, hoje, agoraHora]);
-    const servicosRealizados = servicosRealizadosResult ? servicosRealizadosResult.realizados : 0;
-    console.log(`[Dashboard] Serviços Realizados (hoje, até agora): ${servicosRealizados}`);
-
-    // Receita do dia (APENAS agendamentos que já passaram - SEM FILTRO DE STATUS)
-    const receitaDiaResult = await get(`
-      SELECT SUM(COALESCE(preco, 0)) as receita_realizada
-      FROM (
-        SELECT preco FROM agendamentos 
-        WHERE data = ? AND hora < ?
-        UNION ALL
-        SELECT preco FROM agendamentos_yuri 
-        WHERE data = ? AND hora < ?
-      )
-    `, [hoje, agoraHora, hoje, agoraHora]);
-    const receitaDia = receitaDiaResult ? (receitaDiaResult.receita_realizada || 0) / 100 : 0;
-    console.log(`[Dashboard] Receita do Dia (hoje, até agora): R$ ${receitaDia}`);
-
-    // ============================================================================
-    // PARTE 2: DADOS FUTUROS (Próximas 24h a partir de agora)
-    // ============================================================================
-    // Busca todos os agendamentos de hoje e amanhã - SEM FILTRO DE STATUS
     const todosAgendamentos = await all(`
       SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber 
       FROM agendamentos 
@@ -241,22 +196,49 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     console.log(`[Dashboard] Total de agendamentos (hoje + amanhã): ${todosAgendamentos.length}`);
 
-    // Filtra apenas os agendamentos FUTUROS (próximas 24h a partir de agora) - SEM FILTRO DE STATUS
+    // ============================================================================
+    // FILTRA AGENDAMENTOS PASSADOS (HOJE, HORA < AGORA)
+    // ============================================================================
+    const agendamentosPassados = todosAgendamentos.filter(a => {
+      return a.data === hoje && a.hora < agoraHora;
+    });
+
+    console.log(`[Dashboard] Agendamentos passados hoje: ${agendamentosPassados.length}`);
+
+    // ============================================================================
+    // FILTRA AGENDAMENTOS FUTUROS (PRÓXIMAS 24H)
+    // ============================================================================
     const agendamentos24h = todosAgendamentos.filter(a => {
       // Para hoje: hora DEVE SER ESTRITAMENTE MAIOR que a hora atual
       if (a.data === hoje) {
-        const isFuture = a.hora > agoraHora;
-        console.log(`[Dashboard] Hoje ${a.cliente_nome} ${a.hora}: ${isFuture ? 'FUTURO' : 'PASSADO'}`);
-        return isFuture;
+        return a.hora > agoraHora;
       }
       // Para amanhã: TODOS os agendamentos de amanhã são futuros (próximas 24h)
       if (a.data === amanha) {
-        console.log(`[Dashboard] Amanhã ${a.cliente_nome} ${a.hora}: FUTURO`);
         return true;
       }
       return false;
     });
 
+    console.log(`[Dashboard] Agendamentos nas próximas 24h (Aguardando): ${agendamentos24h.length}`);
+
+    // ============================================================================
+    // CALCULA ESTATÍSTICAS COM BASE NOS FILTROS ACIMA
+    // ============================================================================
+    
+    // Total de agendamentos de hoje (00:00 às 23:59)
+    const atendimentosHoje = todosAgendamentos.filter(a => a.data === hoje).length;
+    console.log(`[Dashboard] Total agendamentos hoje (00:00-23:59): ${atendimentosHoje}`);
+
+    // Serviços realizados = agendamentos que já passaram
+    const servicosRealizados = agendamentosPassados.length;
+    console.log(`[Dashboard] Serviços Realizados (hoje, até agora): ${servicosRealizados}`);
+
+    // Receita do dia = soma dos preços dos agendamentos que já passaram
+    const receitaDia = agendamentosPassados.reduce((sum, a) => sum + (a.preco || 0), 0) / 100;
+    console.log(`[Dashboard] Receita do Dia (hoje, até agora): R$ ${receitaDia}`);
+
+    // Aguardando = quantidade de agendamentos nas próximas 24h
     const servicosAguardando = agendamentos24h.length;
     console.log(`[Dashboard] Agendamentos nas próximas 24h (Aguardando): ${servicosAguardando}`);
 
