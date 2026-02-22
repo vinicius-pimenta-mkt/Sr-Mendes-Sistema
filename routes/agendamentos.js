@@ -4,11 +4,18 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
-// Função auxiliar para deixar apenas números no telefone
 const limparTelefone = (telefone) => {
   if (!telefone || typeof telefone !== 'string') return null;
   const apenasNumeros = telefone.replace(/\D/g, '');
   return apenasNumeros.length > 0 ? apenasNumeros : null;
+};
+
+// Trava Global de Dias Fechados
+const isDiaFechado = (dataStr) => {
+  const [ano, mes, dia] = dataStr.split('-');
+  const dataObj = new Date(ano, mes - 1, dia);
+  const diaSemana = dataObj.getDay();
+  return diaSemana === 0 || diaSemana === 1; // 0 = Domingo, 1 = Segunda
 };
 
 // Listar todos os agendamentos
@@ -35,13 +42,18 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// Criar novo agendamento
+// Criar novo agendamento (API protegida)
 router.post('/', async (req, res) => {
   try {
     const { cliente_nome, cliente_telefone, servico, data, hora, status = 'Confirmado', preco, forma_pagamento, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
+    }
+
+    // TRAVA: API rejeita dias fechados (A IA não conseguirá burlar)
+    if (isDiaFechado(data) && status !== 'Bloqueado') {
+      return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
     }
 
     const telefoneLimpo = limparTelefone(cliente_telefone);
@@ -60,9 +72,7 @@ router.post('/', async (req, res) => {
         } else {
           await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
         }
-      } catch (assinanteError) {
-        console.error('Aviso: Erro ao atualizar a visita (ignorado):', assinanteError);
-      }
+      } catch (e) {}
     }
     
     res.status(201).json({ id: result.lastID, message: 'Agendamento criado' });
@@ -71,42 +81,17 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Bloquear horários em lote (Lucas)
-router.post('/bloquear', verifyToken, async (req, res) => {
-  try {
-    const { bloqueios } = req.body;
-    if (!bloqueios || !Array.isArray(bloqueios)) {
-      return res.status(400).json({ error: 'Formato inválido. Esperado um array de bloqueios.' });
-    }
-    
-    for (const b of bloqueios) {
-      await query(
-        `INSERT INTO agendamentos (cliente_nome, servico, data, hora, status, preco, forma_pagamento, observacoes) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['Bloqueio de Agenda', 'Horário Bloqueado', b.data, b.hora, 'Bloqueado', 0, '-', b.blockId]
-      );
-    }
-    res.status(201).json({ message: 'Horários bloqueados com sucesso' });
-  } catch (error) {
-    res.status(500).json({ error: 'Erro ao bloquear horários' });
-  }
-});
-
-// Excluir bloqueio em lote (Lucas)
-router.delete('/bloqueio/:blockId', verifyToken, async (req, res) => {
-  try {
-    await query('DELETE FROM agendamentos WHERE observacoes = ? AND status = ?', [req.params.blockId, 'Bloqueado']);
-    res.json({ message: 'Bloqueio removido' });
-  } catch (error) {
-    res.status(500).json({ error: 'Erro ao remover bloqueio' });
-  }
-});
-
-// Atualizar agendamento
+// Atualizar agendamento (API protegida)
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
+    
+    // TRAVA: API rejeita edição para dias fechados
+    if (isDiaFechado(data) && status !== 'Bloqueado') {
+      return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
+    }
+
     const telefoneLimpo = limparTelefone(cliente_telefone);
 
     await query(
@@ -122,7 +107,7 @@ router.put('/:id', verifyToken, async (req, res) => {
         } else {
           await query('UPDATE assinantes SET ultima_visita = ? WHERE nome = ?', [dataVisita, cliente_nome]);
         }
-      } catch (assinanteError) {}
+      } catch (e) {}
     }
     
     res.json({ message: 'Agendamento atualizado' });
@@ -131,7 +116,6 @@ router.put('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Deletar agendamento
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
     await query('DELETE FROM agendamentos WHERE id = ?', [req.params.id]);
