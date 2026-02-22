@@ -55,14 +55,14 @@ router.get('/check', async (req, res) => {
   }
 });
 
-// Criar assinante
+// Criar assinante (Agora com Telefone)
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { nome, cpf, plano, data_vencimento, ultimo_pagamento, forma_pagamento, status = 'Ativo' } = req.body;
+    const { nome, cpf, telefone, plano, data_vencimento, ultimo_pagamento, forma_pagamento, status = 'Ativo' } = req.body;
     
     const result = await query(
-      'INSERT INTO assinantes (nome, cpf, plano, data_vencimento, ultimo_pagamento, forma_pagamento, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [nome, cpf, plano, data_vencimento, ultimo_pagamento, forma_pagamento, status]
+      'INSERT INTO assinantes (nome, cpf, telefone, plano, data_vencimento, ultimo_pagamento, forma_pagamento, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [nome, cpf, telefone, plano, data_vencimento, ultimo_pagamento, forma_pagamento, status]
     );
     
     res.status(201).json({ id: result.lastID, message: 'Assinante cadastrado' });
@@ -71,15 +71,15 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
-// Atualizar assinante
+// Atualizar assinante (Agora com Telefone)
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { nome, cpf, plano, data_vencimento, ultima_visita, ultimo_pagamento, forma_pagamento, status } = req.body;
+    const { nome, cpf, telefone, plano, data_vencimento, ultima_visita, ultimo_pagamento, forma_pagamento, status } = req.body;
 
     await query(
-      'UPDATE assinantes SET nome=?, cpf=?, plano=?, data_vencimento=?, ultima_visita=?, ultimo_pagamento=?, forma_pagamento=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-      [nome, cpf, plano, data_vencimento, ultima_visita, ultimo_pagamento, forma_pagamento, status, id]
+      'UPDATE assinantes SET nome=?, cpf=?, telefone=?, plano=?, data_vencimento=?, ultima_visita=?, ultimo_pagamento=?, forma_pagamento=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+      [nome, cpf, telefone, plano, data_vencimento, ultima_visita, ultimo_pagamento, forma_pagamento, status, id]
     );
     
     res.json({ message: 'Assinante atualizado' });
