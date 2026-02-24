@@ -36,8 +36,9 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenciais inválidas' });
     }
 
+    // INJEÇÃO DA MANUS: Incluindo o 'role' no Token JWT
     const token = jwt.sign(
-      { id: user.id, username: user.username },
+      { id: user.id, username: user.username, role: user.role },
       process.env.JWT_SECRET || '019283',
       { expiresIn: '24h' }
     );
@@ -45,7 +46,8 @@ router.post('/login', async (req, res) => {
     res.json({
       message: 'Login realizado com sucesso',
       token,
-      user: { id: user.id, username: user.username }
+      // INJEÇÃO DA MANUS: Devolvendo o 'role' para o Frontend
+      user: { id: user.id, username: user.username, role: user.role }
     });
   } catch (error) {
     console.error('Erro no login:', error);
@@ -56,7 +58,8 @@ router.post('/login', async (req, res) => {
 // Rota para obter dados do usuário autenticado
 router.get('/me', verifyToken, async (req, res) => {
   try {
-    const user = await get('SELECT id, username FROM users WHERE id = ?', [req.user.id]);
+    // INJEÇÃO DA MANUS: Buscando o 'role' no banco de dados
+    const user = await get('SELECT id, username, role FROM users WHERE id = ?', [req.user.id]);
     
     if (!user) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
