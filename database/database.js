@@ -19,12 +19,13 @@ export const initDatabase = async () => {
       driver: sqlite3.Database
     });
 
-    // Tabela de usuários
+    // Tabela de usuários (ATUALIZADA COM O SISTEMA DE CARGOS/ROLES DA MANUS)
     await db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
+        role TEXT DEFAULT 'admin',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -100,7 +101,8 @@ export const initDatabase = async () => {
       )
     `);
 
-    // Migrações de segurança
+    // Migrações de segurança (AGORA INCLUINDO A MIGRAÇÃO DA MANUS PARA A COLUNA ROLE)
+    try { await db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'"); } catch (e) {}
     try { await db.exec("ALTER TABLE agendamentos ADD COLUMN forma_pagamento TEXT"); } catch (e) {}
     try { await db.exec("ALTER TABLE agendamentos_yuri ADD COLUMN forma_pagamento TEXT"); } catch (e) {}
     try { await db.exec("ALTER TABLE agendamentos ADD COLUMN cliente_telefone TEXT"); } catch (e) {}
@@ -109,14 +111,23 @@ export const initDatabase = async () => {
     try { await db.exec("ALTER TABLE assinantes ADD COLUMN telefone TEXT"); } catch (e) {}
     try { await db.exec("ALTER TABLE clientes ADD COLUMN cpf TEXT"); } catch (e) {}
 
-    // Inserir usuário admin padrão se não existir
-    const adminUser = process.env.ADMIN_USER || 'adminmendes';
-    const adminPass = process.env.ADMIN_PASS || 'mendesbarber01';
+    // Inserir usuário admin padrão se não existir (ATUALIZADO)
+    const adminUser = process.env.ADMIN_USER || 'adminbm';
+    const adminPass = process.env.ADMIN_PASS || 'belmasc2026';
 
     const existingUser = await db.get('SELECT * FROM users WHERE username = ?', adminUser);
     if (!existingUser) {
-      await db.run('INSERT INTO users (username, password) VALUES (?, ?)', adminUser, adminPass);
+      await db.run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', adminUser, adminPass, 'admin');
       console.log('Usuário admin padrão inserido.');
+    }
+
+    // Inserir usuário Yuri se não existir (NOVIDADE IMPLEMENTADA)
+    const yuriUser = 'yuribarber';
+    const yuriPass = 'yuri2026'; // Senha de acesso para o Yuri
+    const existingYuri = await db.get('SELECT * FROM users WHERE username = ?', yuriUser);
+    if (!existingYuri) {
+      await db.run('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', yuriUser, yuriPass, 'yuri');
+      console.log('Usuário Yuri inserido.');
     }
 
     console.log('Banco de dados SQLite inicializado com sucesso!');
