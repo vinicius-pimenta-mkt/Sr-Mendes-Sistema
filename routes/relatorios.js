@@ -4,10 +4,9 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
-// Função auxiliar para obter a hora atual em Brasília (GMT-3)
+// Função auxiliar para obter a hora atual em Brasília (GMT-3) - (NOSSA LÓGICA MANTIDA)
 const getBrasiliaTime = () => {
   const agora = new Date();
-  // Ajusta para o fuso horário de Brasília (UTC-3)
   const brasiliaOffset = -3;
   const utc = agora.getTime() + (agora.getTimezoneOffset() * 60000);
   const dataBrasilia = new Date(utc + (3600000 * brasiliaOffset));
@@ -20,7 +19,13 @@ const getBrasiliaTime = () => {
 
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
-    const { periodo = 'mes', data_inicio, data_fim, barber = 'Geral' } = req.query;
+    let { periodo = 'mes', data_inicio, data_fim, barber = 'Geral' } = req.query;
+    
+    // INJEÇÃO DA MANUS: Forçar a visão exclusiva se o usuário for Yuri
+    if (req.user.role === 'yuri') {
+      barber = 'Yuri';
+    }
+
     let dIni, dFim;
     const { dataStr: hojeStr, dataBrasilia: hoje } = getBrasiliaTime();
     
@@ -155,42 +160,69 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
+    // INJEÇÃO DA MANUS: Variável para descobrir quem está logado
+    const isYuri = req.user.role === 'yuri';
+    
+    // NOSSA LÓGICA DE FUSO E MATEMÁTICA DO DASHBOARD
     const { dataStr: hojeStr, horaStr: agoraHora } = getBrasiliaTime();
     
     const amanhaData = new Date();
     amanhaData.setDate(amanhaData.getDate() + 1);
     const amanhaStr = amanhaData.toISOString().split('T')[0];
 
-    // Buscar agendamentos FUTUROS (daqui pra frente nas próximas 24h)
-    const agendamentosFuturos = await all(`
-      SELECT * FROM (
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
-        WHERE status != 'Cancelado' AND (
-          (data = ? AND hora > ?) OR 
-          (data = ? AND hora <= ?)
-        )
-        UNION ALL
+    // INJEÇÃO DA MANUS: Buscar agendamentos limitados ou totais dependendo de quem logou
+    let agendamentosFuturos;
+    if (isYuri) {
+      agendamentosFuturos = await all(`
         SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
         WHERE status != 'Cancelado' AND (
           (data = ? AND hora > ?) OR 
           (data = ? AND hora <= ?)
-        )
-      ) ORDER BY data ASC, hora ASC
-    `, [hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, agoraHora, amanhaStr, agoraHora]);
+        ) ORDER BY data ASC, hora ASC
+      `, [hojeStr, agoraHora, amanhaStr, agoraHora]);
+    } else {
+      agendamentosFuturos = await all(`
+        SELECT * FROM (
+          SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
+          WHERE status != 'Cancelado' AND (
+            (data = ? AND hora > ?) OR 
+            (data = ? AND hora <= ?)
+          )
+          UNION ALL
+          SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
+          WHERE status != 'Cancelado' AND (
+            (data = ? AND hora > ?) OR 
+            (data = ? AND hora <= ?)
+          )
+        ) ORDER BY data ASC, hora ASC
+      `, [hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, agoraHora, amanhaStr, agoraHora]);
+    }
 
-    // Estatísticas do dia de hoje
-    const stats = await get(`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
-        SUM(CASE WHEN hora <= ? THEN 1 ELSE 0 END) as realized,
-        SUM(CASE WHEN hora > ? AND status = 'Pendente' THEN 1 ELSE 0 END) as pending_future
-      FROM (
-        SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
-        UNION ALL
-        SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
-      )
-    `, [agoraHora, agoraHora, hojeStr, hojeStr]);
+    // INJEÇÃO DA MANUS: Estatísticas limitadas ou totais dependendo de quem logou
+    let stats;
+    if (isYuri) {
+      stats = await get(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
+          SUM(CASE WHEN hora <= ? THEN 1 ELSE 0 END) as realized,
+          SUM(CASE WHEN hora > ? AND status = 'Pendente' THEN 1 ELSE 0 END) as pending_future
+        FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
+      `, [agoraHora, agoraHora, hojeStr]);
+    } else {
+      stats = await get(`
+        SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
+          SUM(CASE WHEN hora <= ? THEN 1 ELSE 0 END) as realized,
+          SUM(CASE WHEN hora > ? AND status = 'Pendente' THEN 1 ELSE 0 END) as pending_future
+        FROM (
+          SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
+          UNION ALL
+          SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
+        )
+      `, [agoraHora, agoraHora, hojeStr, hojeStr]);
+    }
 
     res.json({
       atendimentosHoje: stats.total || 0,
