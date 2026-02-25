@@ -57,6 +57,70 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
+// NOVA ROTA PARA A IA: Calcula a disponibilidade exata
+router.get('/disponibilidade', verifyToken, async (req, res) => {
+  try {
+    const { data } = req.query;
+    if (!data) return res.status(400).json({ error: 'Data é obrigatória' });
+
+    // 1. Verifica Domingo e Segunda
+    if (isDiaFechado(data)) {
+      return res.json({ livres: [], mensagem: 'A barbearia está fechada aos Domingos e Segundas.' });
+    }
+
+    const [ano, mes, dia] = data.split('-');
+    const dataObj = new Date(ano, mes - 1, dia);
+    const diaSemana = dataObj.getDay();
+
+    // 2. Gera a grade de horários (a matemática do funcionamento)
+    let slots = [];
+    if (diaSemana === 6) { 
+      // Sábado: 08:00 às 18:00
+      for (let h = 8; h < 18; h++) {
+        slots.push(`${h.toString().padStart(2, '0')}:00`);
+        slots.push(`${h.toString().padStart(2, '0')}:30`);
+      }
+    } else { 
+      // Terça a Sexta: 09:00 às 19:00 (Almoço 12h)
+      for (let h = 9; h < 19; h++) {
+        if (h !== 12) { 
+          slots.push(`${h.toString().padStart(2, '0')}:00`);
+          slots.push(`${h.toString().padStart(2, '0')}:30`);
+        }
+      }
+    }
+
+    // 3. Remove horários que já passaram (se for hoje)
+    const agora = new Date();
+    const brasiliaOffset = -3;
+    const utc = agora.getTime() + (agora.getTimezoneOffset() * 60000);
+    const dataBrasilia = new Date(utc + (3600000 * brasiliaOffset));
+    const hojeStr = dataBrasilia.toISOString().split('T')[0];
+    
+    if (data === hojeStr) {
+       const horaAtual = dataBrasilia.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+       slots = slots.filter(slot => slot > horaAtual.substring(0, 5));
+    } else if (data < hojeStr) {
+       return res.json({ livres: [], mensagem: 'Não é possível agendar no passado.' });
+    }
+
+    // 4. Busca os horários ocupados no banco de dados
+    const ocupados = await all(
+      "SELECT hora FROM agendamentos WHERE data = ? AND status IN ('Confirmado', 'Pendente', 'Bloqueado')",
+      [data]
+    );
+    const horasOcupadas = ocupados.map(o => o.hora.substring(0, 5));
+
+    // 5. Cruza os dados: O que tem na grade que NÃO está ocupado?
+    const horariosLivres = slots.filter(slot => !horasOcupadas.includes(slot));
+
+    res.json({ livres: horariosLivres });
+  } catch (error) {
+    console.error('Erro na disponibilidade:', error);
+    res.status(500).json({ error: 'Erro ao calcular disponibilidade' });
+  }
+});
+
 // Criar novo agendamento (API protegida)
 // Criar novo agendamento (API protegida)
 router.post('/', async (req, res) => {
