@@ -62,15 +62,18 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
     }
 
+    // NORMALIZAÇÃO: Corta os segundos para garantir que fique sempre no formato "HH:mm"
+    const horaFormatada = hora.substring(0, 5);
+
     // TRAVA 1: Rejeita dias fechados
     if (isDiaFechado(data) && status !== 'Bloqueado') {
       return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
     }
 
-    // TRAVA 2: ANTI-CHOQUE DE AGENDA YURI
+    // TRAVA 2: ANTI-CHOQUE DE AGENDA YURI (Agora com a hora formatada)
     const horarioOcupado = await get(
       "SELECT id FROM agendamentos_yuri WHERE data = ? AND hora = ? AND status != 'Cancelado'",
-      [data, hora]
+      [data, horaFormatada]
     );
 
     if (horarioOcupado && status !== 'Bloqueado') {
@@ -80,14 +83,15 @@ router.post('/', async (req, res) => {
     const telefoneLimpo = limparTelefone(cliente_telefone);
     const safeClienteId = cliente_id || null;
 
+    // Salvando no banco com a horaFormatada
     const result = await query(
       'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [safeClienteId, cliente_nome, telefoneLimpo, servico, data, hora, status, preco, forma_pagamento, observacoes]
+      [safeClienteId, cliente_nome, telefoneLimpo, servico, data, horaFormatada, status, preco, forma_pagamento, observacoes]
     );
 
     if (status === 'Confirmado') {
       try {
-        const dataVisita = `${data.split('-').reverse().join('/')} ${hora}`;
+        const dataVisita = `${data.split('-').reverse().join('/')} ${horaFormatada}`;
         if (telefoneLimpo) {
           await query('UPDATE assinantes SET ultima_visita = ? WHERE telefone = ? OR nome = ?', [dataVisita, telefoneLimpo, cliente_nome]);
         } else {
