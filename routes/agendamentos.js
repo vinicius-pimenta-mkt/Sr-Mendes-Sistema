@@ -60,38 +60,42 @@ router.get('/', verifyToken, async (req, res) => {
 // Criar novo agendamento (API protegida)
 router.post('/', async (req, res) => {
   try {
-    const { cliente_nome, cliente_telefone, servico, data, hora, status = 'Confirmado', preco, forma_pagamento, observacoes, cliente_id } = req.body;
+    const { cliente_nome, cliente_telefone, servico, data, hora, status = 'Pendente', preco, forma_pagamento, observacoes, cliente_id } = req.body;
 
     if (!cliente_nome || !servico || !data || !hora) {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
     }
+
+    // NORMALIZAÇÃO: Corta os segundos para garantir que fique sempre no formato "HH:mm"
+    const horaFormatada = hora.substring(0, 5);
 
     // TRAVA 1: Rejeita dias fechados
     if (isDiaFechado(data) && status !== 'Bloqueado') {
       return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
     }
 
-    // TRAVA 2: ANTI-CHOQUE DE AGENDA (O Cão de Guarda)
+    // TRAVA 2: ANTI-CHOQUE DE AGENDA YURI (Agora com a hora formatada)
     const horarioOcupado = await get(
-      "SELECT id FROM agendamentos WHERE data = ? AND hora = ? AND status != 'Cancelado'",
-      [data, hora]
+      "SELECT id FROM agendamentos_yuri WHERE data = ? AND hora = ? AND status != 'Cancelado'",
+      [data, horaFormatada]
     );
 
     if (horarioOcupado && status !== 'Bloqueado') {
-      return res.status(400).json({ error: 'Horário indisponível. Já existe um agendamento para este momento.' });
+      return res.status(400).json({ error: 'Horário indisponível. O Yuri já tem um cliente neste horário.' });
     }
 
     const telefoneLimpo = limparTelefone(cliente_telefone);
     const safeClienteId = cliente_id || null;
 
+    // Salvando no banco com a horaFormatada
     const result = await query(
-      'INSERT INTO agendamentos (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [safeClienteId, cliente_nome, telefoneLimpo, servico, data, hora, status, preco, forma_pagamento, observacoes]
+      'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [safeClienteId, cliente_nome, telefoneLimpo, servico, data, horaFormatada, status, preco, forma_pagamento, observacoes]
     );
 
     if (status === 'Confirmado') {
       try {
-        const dataVisita = `${data.split('-').reverse().join('/')} ${hora}`;
+        const dataVisita = `${data.split('-').reverse().join('/')} ${horaFormatada}`;
         if (telefoneLimpo) {
           await query('UPDATE assinantes SET ultima_visita = ? WHERE telefone = ? OR nome = ?', [dataVisita, telefoneLimpo, cliente_nome]);
         } else {
@@ -100,9 +104,9 @@ router.post('/', async (req, res) => {
       } catch (e) {}
     }
     
-    res.status(201).json({ id: result.lastID, message: 'Agendamento criado' });
+    res.status(201).json({ id: result.lastID, message: 'Agendamento criado para o Yuri' });
   } catch (error) {
-    res.status(500).json({ error: 'Erro ao criar agendamento' });
+    res.status(500).json({ error: 'Erro ao criar agendamento do Yuri' });
   }
 });
 
