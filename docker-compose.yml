@@ -10,10 +10,14 @@ services:
       ADMIN_USER: "adminbm"
       ADMIN_PASS: "belmasc2026"
     volumes:
-      # Caminho CORRIGIDO para proteger a pasta real do banco de dados
-      - ./database_data:/app/database
+      # Trocamos o ./database_data por um Volume Nomeado
+      - dados_barbearia:/app/database
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.srmendes.rule=Host(`api.unvgroup.tech`)"
       - "traefik.http.routers.srmendes.entrypoints=websecure"
       - "traefik.http.routers.srmendes.tls.certresolver=myresolver"
+
+# ADICIONE ESTE BLOCO NO FINAL DO ARQUIVO (colado no canto esquerdo, sem espaços antes)
+volumes:
+  dados_barbearia:
