@@ -10,12 +10,27 @@ const limparTelefone = (telefone) => {
   return apenasNumeros.length > 0 ? apenasNumeros : null;
 };
 
-// Trava Global de Dias Fechados
+// Trava Global de Dias Fechados (REFORÇADA - À Prova de IA)
 const isDiaFechado = (dataStr) => {
-  const [ano, mes, dia] = dataStr.split('-');
-  const dataObj = new Date(ano, mes - 1, dia);
-  const diaSemana = dataObj.getDay();
-  return diaSemana === 0 || diaSemana === 1; // 0 = Domingo, 1 = Segunda
+  if (!dataStr) return false;
+  try {
+    // Limpa a data caso a IA envie com fuso horário ou horas junto
+    const soData = dataStr.split('T')[0].split(' ')[0];
+    let ano, mes, dia;
+    
+    // Entende tanto formato DD/MM/YYYY quanto YYYY-MM-DD
+    if (soData.includes('/')) {
+      [dia, mes, ano] = soData.split('/');
+    } else {
+      [ano, mes, dia] = soData.split('-');
+    }
+    
+    const dataObj = new Date(Number(ano), Number(mes) - 1, Number(dia));
+    const diaSemana = dataObj.getDay();
+    return diaSemana === 0 || diaSemana === 1; // 0 = Domingo, 1 = Segunda
+  } catch (e) {
+    return false;
+  }
 };
 
 // Listar todos os agendamentos
@@ -51,9 +66,19 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
     }
 
-    // TRAVA: API rejeita dias fechados (A IA não conseguirá burlar)
+    // TRAVA 1: Rejeita dias fechados
     if (isDiaFechado(data) && status !== 'Bloqueado') {
       return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
+    }
+
+    // TRAVA 2: ANTI-CHOQUE DE AGENDA (O Cão de Guarda)
+    const horarioOcupado = await get(
+      "SELECT id FROM agendamentos WHERE data = ? AND hora = ? AND status != 'Cancelado'",
+      [data, hora]
+    );
+
+    if (horarioOcupado && status !== 'Bloqueado') {
+      return res.status(400).json({ error: 'Horário indisponível. Já existe um agendamento para este momento.' });
     }
 
     const telefoneLimpo = limparTelefone(cliente_telefone);
@@ -87,9 +112,19 @@ router.put('/:id', verifyToken, async (req, res) => {
     const { id } = req.params;
     const { cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
     
-    // TRAVA: API rejeita edição para dias fechados
+    // TRAVA 1: Rejeita edição para dias fechados
     if (isDiaFechado(data) && status !== 'Bloqueado') {
       return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
+    }
+
+    // TRAVA 2: ANTI-CHOQUE DE AGENDA NA EDIÇÃO
+    const horarioOcupado = await get(
+      "SELECT id FROM agendamentos WHERE data = ? AND hora = ? AND status != 'Cancelado' AND id != ?",
+      [data, hora, id]
+    );
+
+    if (horarioOcupado && status !== 'Bloqueado') {
+      return res.status(400).json({ error: 'Horário indisponível. Já existe um agendamento para este momento.' });
     }
 
     const telefoneLimpo = limparTelefone(cliente_telefone);
