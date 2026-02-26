@@ -108,10 +108,11 @@ router.get('/resumo', verifyToken, async (req, res) => {
       rawRevenue = await all(revenueQuery, [dIni, dFim]);
     }
 
-    const receitaDet = rawRevenue.map(r => ({ 
-      periodo: isToday ? r.periodo : r.periodo.split('-').reverse().join('/'), 
-      valor: (r.total || 0) / 100
-    }));
+    const receitaDetMap = {};
+    rawRevenue.forEach(r => {
+      const per = isToday ? r.periodo : r.periodo.split('-').reverse().join('/');
+      receitaDetMap[per] = (r.total || 0) / 100;
+    });
 
     // 3. Receita por Meio de Pagamento
     let paymentsQuery = "";
@@ -123,11 +124,59 @@ router.get('/resumo', verifyToken, async (req, res) => {
       paymentsQuery = `SELECT forma_pagamento, SUM(COALESCE(preco, 0)) as total, COUNT(*) as qty FROM agendamentos_yuri WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY forma_pagamento`;
     }
     const rawPayments = await all(paymentsQuery, [dIni, dFim]);
-    const byPayment = rawPayments.map(p => ({
-      forma: p.forma_pagamento || 'Não informado',
-      valor: (p.total || 0) / 100,
-      quantidade: p.qty
-    }));
+    
+    const byPaymentMap = {};
+    rawPayments.forEach(p => {
+      byPaymentMap[p.forma_pagamento || 'Não informado'] = { valor: (p.total || 0) / 100, quantidade: p.qty };
+    });
+
+    // =========================================================
+    // NOVA INTEGRAÇÃO: ADICIONANDO VENDAS DE PRODUTOS
+    // =========================================================
+    const productSales = await all(`
+      SELECT p.nome as service, h.quantidade as qty, h.valor_total as revenue, h.forma_pagamento, h.data, h.hora
+      FROM produtos_historico h JOIN produtos p ON h.produto_id = p.id
+      WHERE h.tipo = 'venda' AND h.data BETWEEN ? AND ?
+    `, [dIni, dFim]);
+
+    const prodTableMap = {};
+    productSales.forEach(ps => {
+      // Prepara a tabela de produtos vendidos
+      if(!prodTableMap[ps.service]) {
+        prodTableMap[ps.service] = { produto: ps.service, qty: 0, revenue: 0 };
+      }
+      prodTableMap[ps.service].qty += ps.qty;
+      prodTableMap[ps.service].revenue += ps.revenue / 100;
+      
+      const val = ps.revenue / 100;
+      
+      // Injeta o dinheiro do produto no Gráfico de Linhas (Faturamento por tempo)
+      const per = isToday ? ps.hora.substring(0,2)+':00' : ps.data.split('-').reverse().join('/');
+      if(receitaDetMap[per] !== undefined) {
+        receitaDetMap[per] += val;
+      } else {
+        receitaDetMap[per] = val;
+      }
+      
+      // Injeta o dinheiro do produto no Gráfico de Pizza e Totalizador (Pagamentos)
+      const form = ps.forma_pagamento || 'Não informado';
+      if(byPaymentMap[form]) { 
+        byPaymentMap[form].valor += val; 
+      } else { 
+        byPaymentMap[form] = { valor: val, quantidade: 0 }; 
+      }
+    });
+
+    // Transforma os Maps de volta em Arrays para o Frontend
+    const receitaDet = Object.keys(receitaDetMap)
+      .map(k => ({ periodo: k, valor: receitaDetMap[k] }))
+      .sort((a,b) => a.periodo.localeCompare(b.periodo));
+      
+    const byPayment = Object.keys(byPaymentMap)
+      .map(k => ({ forma: k, valor: byPaymentMap[k].valor, quantidade: byPaymentMap[k].quantidade }));
+      
+    const produtosVendidos = Object.values(prodTableMap).sort((a,b) => b.revenue - a.revenue);
+    // =========================================================
 
     // 4. Lista de Agendamentos
     let listQuery = "";
@@ -151,7 +200,14 @@ router.get('/resumo', verifyToken, async (req, res) => {
     }
     const topClients = await all(clientsQuery, [dIni, dFim]);
 
-    res.json({ by_service: byService, receita_detalhada: receitaDet, by_payment: byPayment, agendamentos, top_clients: topClients });
+    res.json({ 
+      by_service: byService, 
+      receita_detalhada: receitaDet, 
+      by_payment: byPayment, 
+      agendamentos, 
+      top_clients: topClients,
+      produtos_vendidos: produtosVendidos // <-- A tabela de produtos enviada para o frontend
+    });
   } catch (error) {
     console.error('Erro em /resumo:', error);
     res.status(500).json({ error: 'Erro interno do servidor' });
