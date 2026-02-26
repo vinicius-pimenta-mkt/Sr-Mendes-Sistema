@@ -29,11 +29,14 @@ const initDb = async () => {
         FOREIGN KEY(produto_id) REFERENCES produtos(id)
       )
     `);
+    console.log("✅ Tabelas de produtos criadas/verificadas com sucesso!");
   } catch (error) {
     console.error('Erro ao criar tabelas de produtos:', error);
   }
 };
-initDb();
+
+// A MÁGICA DA CORREÇÃO: Espera 2 segundos para dar tempo do banco de dados ligar completamente!
+setTimeout(initDb, 2000);
 
 // Listar todos os produtos
 router.get('/', verifyToken, async (req, res) => {
