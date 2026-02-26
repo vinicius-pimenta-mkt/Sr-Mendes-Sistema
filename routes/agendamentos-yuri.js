@@ -54,27 +54,37 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// NOVA ROTA PARA A IA: Calcula a disponibilidade exata
+// NOVA ROTA PARA A IA DO YURI: Calcula a disponibilidade exata (CORRIGIDA)
 router.get('/disponibilidade', verifyToken, async (req, res) => {
   try {
     const { data } = req.query;
     if (!data) return res.status(400).json({ error: 'Data é obrigatória' });
 
-    // 1. Verifica Domingo e Segunda
     if (isDiaFechado(data)) {
       return res.json({ livres: [], mensagem: 'A barbearia está fechada aos Domingos e Segundas.' });
     }
 
-    const [ano, mes, dia] = data.split('-');
+    // TRADUTOR 1: Garante que a data fique YYYY-MM-DD
+    let dataBanco = data;
+    if (data.includes('/')) {
+      const [dia, mes, ano] = data.split('/');
+      dataBanco = `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
+    } else if (data.includes('-')) {
+      const partes = data.split('-');
+      if (partes[0].length === 4) {
+        dataBanco = `${partes[0]}-${partes[1].padStart(2, '0')}-${partes[2].padStart(2, '0')}`;
+      }
+    }
+
+    const [ano, mes, dia] = dataBanco.split('-');
     const dataObj = new Date(ano, mes - 1, dia);
     const diaSemana = dataObj.getDay();
 
-    // 2. Gera a grade de horários (a matemática do funcionamento)
     let slots = [];
     if (diaSemana === 6) { 
       // Sábado: 08:00 às 18:00 (Com almoço 12h)
       for (let h = 8; h < 18; h++) {
-        if (h !== 12) { // <- TRAVA DO ALMOÇO ADICIONADA NO SÁBADO
+        if (h !== 12) { 
           slots.push(`${h.toString().padStart(2, '0')}:00`);
           slots.push(`${h.toString().padStart(2, '0')}:30`);
         }
@@ -88,34 +98,38 @@ router.get('/disponibilidade', verifyToken, async (req, res) => {
         }
       }
     }
-    
-    // 3. Remove horários que já passaram (se for hoje)
+
     const agora = new Date();
     const brasiliaOffset = -3;
     const utc = agora.getTime() + (agora.getTimezoneOffset() * 60000);
     const dataBrasilia = new Date(utc + (3600000 * brasiliaOffset));
     const hojeStr = dataBrasilia.toISOString().split('T')[0];
     
-    if (data === hojeStr) {
+    if (dataBanco === hojeStr) {
        const horaAtual = dataBrasilia.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
        slots = slots.filter(slot => slot > horaAtual.substring(0, 5));
-    } else if (data < hojeStr) {
+    } else if (dataBanco < hojeStr) {
        return res.json({ livres: [], mensagem: 'Não é possível agendar no passado.' });
     }
 
-    // 4. Busca os horários ocupados no banco de dados
+    // AQUI ESTAVA O ERRO! AGORA CORRIGIDO PARA BUSCAR NA TABELA DO YURI:
     const ocupados = await all(
-      "SELECT hora FROM agendamentos WHERE data = ? AND status IN ('Confirmado', 'Pendente', 'Bloqueado')",
-      [data]
+      "SELECT hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'",
+      [dataBanco]
     );
-    const horasOcupadas = ocupados.map(o => o.hora.substring(0, 5));
 
-    // 5. Cruza os dados: O que tem na grade que NÃO está ocupado?
+    // TRADUTOR 3: Previne bugs de formato de hora
+    const horasOcupadas = ocupados.map(o => {
+      if (!o.hora) return '';
+      const partes = o.hora.split(':');
+      return `${partes[0].padStart(2, '0')}:${partes[1].padStart(2, '0')}`;
+    });
+
     const horariosLivres = slots.filter(slot => !horasOcupadas.includes(slot));
 
     res.json({ livres: horariosLivres });
   } catch (error) {
-    console.error('Erro na disponibilidade:', error);
+    console.error('Erro na disponibilidade do Yuri:', error);
     res.status(500).json({ error: 'Erro ao calcular disponibilidade' });
   }
 });
