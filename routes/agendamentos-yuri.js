@@ -72,13 +72,15 @@ router.get('/disponibilidade', verifyToken, async (req, res) => {
     // 2. Gera a grade de horários (a matemática do funcionamento)
     let slots = [];
     if (diaSemana === 6) { 
-      // Sábado: 08:00 às 18:00
+      // Sábado: 08:00 às 18:00 (Com almoço 12h)
       for (let h = 8; h < 18; h++) {
-        slots.push(`${h.toString().padStart(2, '0')}:00`);
-        slots.push(`${h.toString().padStart(2, '0')}:30`);
+        if (h !== 12) { // <- TRAVA DO ALMOÇO ADICIONADA NO SÁBADO
+          slots.push(`${h.toString().padStart(2, '0')}:00`);
+          slots.push(`${h.toString().padStart(2, '0')}:30`);
+        }
       }
     } else { 
-      // Terça a Sexta: 09:00 às 19:00 (Almoço 12h)
+      // Terça a Sexta: 09:00 às 19:00 (Com almoço 12h)
       for (let h = 9; h < 19; h++) {
         if (h !== 12) { 
           slots.push(`${h.toString().padStart(2, '0')}:00`);
@@ -86,7 +88,7 @@ router.get('/disponibilidade', verifyToken, async (req, res) => {
         }
       }
     }
-
+    
     // 3. Remove horários que já passaram (se for hoje)
     const agora = new Date();
     const brasiliaOffset = -3;
