@@ -4,7 +4,6 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
-// Função auxiliar para obter a hora atual em Brasília (GMT-3) - (NOSSA LÓGICA MANTIDA)
 const getBrasiliaTime = () => {
   const agora = new Date();
   const brasiliaOffset = -3;
@@ -17,11 +16,24 @@ const getBrasiliaTime = () => {
   return { dataStr, horaStr, dataBrasilia };
 };
 
+// --- FUNÇÃO PARA LIMPAR E UNIFICAR FORMAS DE PAGAMENTO ---
+const padronizarPagamento = (forma) => {
+  if (!forma) return 'Não informado';
+  // Transforma tudo em minúsculo, tira espaços sobrando e arranca pontos finais
+  const limpo = forma.toLowerCase().trim().replace(/\./g, '');
+  
+  if (limpo.includes('crédito') || limpo.includes('credito')) return 'Cartão de Crédito';
+  if (limpo.includes('débito') || limpo.includes('debito')) return 'Cartão de Débito';
+  if (limpo.includes('dinheiro')) return 'Dinheiro';
+  if (limpo.includes('pix')) return 'Pix';
+  
+  return 'Outros';
+};
+
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
     let { periodo = 'mes', data_inicio, data_fim, barber = 'Geral' } = req.query;
     
-    // INJEÇÃO DA MANUS: Forçar a visão exclusiva se o usuário for Yuri
     if (req.user.role === 'yuri') {
       barber = 'Yuri';
     }
@@ -42,7 +54,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
           dataInicio = new Date(hoje); dataInicio.setDate(hoje.getDate() - 7); break;
         case 'ano': 
           dataInicio = new Date(hoje); dataInicio.setFullYear(hoje.getFullYear() - 1); break;
-        default: // mes
+        default: 
           dataInicio = new Date(hoje); dataInicio.setMonth(hoje.getMonth() - 1);
       }
       dIni = dataInicio.toISOString().split('T')[0];
@@ -52,21 +64,11 @@ router.get('/resumo', verifyToken, async (req, res) => {
     // 1. Serviços por Barbeiro
     let rawServices = [];
     if (barber === 'Geral' || barber === 'Lucas') {
-      const sLucas = await all(`
-        SELECT servico, 'Lucas' as barber, COUNT(*) as qty, SUM(COALESCE(preco, 0)) as revenue
-        FROM agendamentos 
-        WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
-        GROUP BY servico
-      `, [dIni, dFim]);
+      const sLucas = await all(`SELECT servico, 'Lucas' as barber, COUNT(*) as qty, SUM(COALESCE(preco, 0)) as revenue FROM agendamentos WHERE data BETWEEN ? AND ? AND status = 'Confirmado' GROUP BY servico`, [dIni, dFim]);
       rawServices = [...rawServices, ...sLucas];
     }
     if (barber === 'Geral' || barber === 'Yuri') {
-      const sYuri = await all(`
-        SELECT servico, 'Yuri' as barber, COUNT(*) as qty, SUM(COALESCE(preco, 0)) as revenue
-        FROM agendamentos_yuri 
-        WHERE data BETWEEN ? AND ? AND status = 'Confirmado'
-        GROUP BY servico
-      `, [dIni, dFim]);
+      const sYuri = await all(`SELECT servico, 'Yuri' as barber, COUNT(*) as qty, SUM(COALESCE(preco, 0)) as revenue FROM agendamentos_yuri WHERE data BETWEEN ? AND ? AND status = 'Confirmado' GROUP BY servico`, [dIni, dFim]);
       rawServices = [...rawServices, ...sYuri];
     }
 
@@ -114,7 +116,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       receitaDetMap[per] = (r.total || 0) / 100;
     });
 
-    // 3. Receita por Meio de Pagamento
+    // 3. Receita por Meio de Pagamento (AGORA USANDO O PADRONIZADOR)
     let paymentsQuery = "";
     if (barber === 'Geral') {
       paymentsQuery = `SELECT forma_pagamento, SUM(COALESCE(preco, 0)) as total, COUNT(*) as qty FROM (SELECT forma_pagamento, preco, status, data FROM agendamentos UNION ALL SELECT forma_pagamento, preco, status, data FROM agendamentos_yuri) WHERE status = 'Confirmado' AND data BETWEEN ? AND ? GROUP BY forma_pagamento`;
@@ -127,11 +129,18 @@ router.get('/resumo', verifyToken, async (req, res) => {
     
     const byPaymentMap = {};
     rawPayments.forEach(p => {
-      byPaymentMap[p.forma_pagamento || 'Não informado'] = { valor: (p.total || 0) / 100, quantidade: p.qty };
+      const formaPadronizada = padronizarPagamento(p.forma_pagamento);
+      
+      if (byPaymentMap[formaPadronizada]) {
+        byPaymentMap[formaPadronizada].valor += (p.total || 0) / 100;
+        byPaymentMap[formaPadronizada].quantidade += p.qty;
+      } else {
+        byPaymentMap[formaPadronizada] = { valor: (p.total || 0) / 100, quantidade: p.qty };
+      }
     });
 
     // =========================================================
-    // NOVA INTEGRAÇÃO: ADICIONANDO VENDAS DE PRODUTOS
+    // VENDAS DE PRODUTOS
     // =========================================================
     const productSales = await all(`
       SELECT p.nome as service, h.quantidade as qty, h.valor_total as revenue, h.forma_pagamento, h.data, h.hora
@@ -150,7 +159,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       
       const val = ps.revenue / 100;
       
-      // Injeta o dinheiro do produto no Gráfico de Linhas (Faturamento por tempo)
+      // Injeta no Gráfico de Linhas (Faturamento por tempo)
       const per = isToday ? ps.hora.substring(0,2)+':00' : ps.data.split('-').reverse().join('/');
       if(receitaDetMap[per] !== undefined) {
         receitaDetMap[per] += val;
@@ -158,22 +167,23 @@ router.get('/resumo', verifyToken, async (req, res) => {
         receitaDetMap[per] = val;
       }
       
-      // Injeta o dinheiro do produto no Gráfico de Pizza e Totalizador (Pagamentos)
-      const form = ps.forma_pagamento || 'Não informado';
+      // Injeta no Gráfico de Pizza (Pagamentos) usando a padronização
+      const form = padronizarPagamento(ps.forma_pagamento);
       if(byPaymentMap[form]) { 
-        byPaymentMap[form].valor += val; 
+        byPaymentMap[form].valor += val;
+        // Não somamos +1 na 'quantidade' de serviços pois produto não é serviço
       } else { 
         byPaymentMap[form] = { valor: val, quantidade: 0 }; 
       }
     });
 
-    // Transforma os Maps de volta em Arrays para o Frontend
     const receitaDet = Object.keys(receitaDetMap)
       .map(k => ({ periodo: k, valor: receitaDetMap[k] }))
       .sort((a,b) => a.periodo.localeCompare(b.periodo));
       
     const byPayment = Object.keys(byPaymentMap)
-      .map(k => ({ forma: k, valor: byPaymentMap[k].valor, quantidade: byPaymentMap[k].quantidade }));
+      .map(k => ({ forma: k, valor: byPaymentMap[k].valor, quantidade: byPaymentMap[k].quantidade }))
+      .sort((a,b) => b.valor - a.valor); // Ordena do maior pro menor valor
       
     const produtosVendidos = Object.values(prodTableMap).sort((a,b) => b.revenue - a.revenue);
     // =========================================================
@@ -206,7 +216,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       by_payment: byPayment, 
       agendamentos, 
       top_clients: topClients,
-      produtos_vendidos: produtosVendidos // <-- A tabela de produtos enviada para o frontend
+      produtos_vendidos: produtosVendidos
     });
   } catch (error) {
     console.error('Erro em /resumo:', error);
@@ -216,68 +226,25 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
 router.get('/dashboard', verifyToken, async (req, res) => {
   try {
-    // INJEÇÃO DA MANUS: Variável para descobrir quem está logado
     const isYuri = req.user.role === 'yuri';
-    
-    // NOSSA LÓGICA DE FUSO E MATEMÁTICA DO DASHBOARD
     const { dataStr: hojeStr, horaStr: agoraHora } = getBrasiliaTime();
     
     const amanhaData = new Date();
     amanhaData.setDate(amanhaData.getDate() + 1);
     const amanhaStr = amanhaData.toISOString().split('T')[0];
 
-    // INJEÇÃO DA MANUS: Buscar agendamentos limitados ou totais dependendo de quem logou
     let agendamentosFuturos;
     if (isYuri) {
-      agendamentosFuturos = await all(`
-        SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
-        WHERE status != 'Cancelado' AND (
-          (data = ? AND hora > ?) OR 
-          (data = ? AND hora <= ?)
-        ) ORDER BY data ASC, hora ASC
-      `, [hojeStr, agoraHora, amanhaStr, agoraHora]);
+      agendamentosFuturos = await all(`SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri WHERE status != 'Cancelado' AND ((data = ? AND hora > ?) OR (data = ? AND hora <= ?)) ORDER BY data ASC, hora ASC`, [hojeStr, agoraHora, amanhaStr, agoraHora]);
     } else {
-      agendamentosFuturos = await all(`
-        SELECT * FROM (
-          SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos 
-          WHERE status != 'Cancelado' AND (
-            (data = ? AND hora > ?) OR 
-            (data = ? AND hora <= ?)
-          )
-          UNION ALL
-          SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri 
-          WHERE status != 'Cancelado' AND (
-            (data = ? AND hora > ?) OR 
-            (data = ? AND hora <= ?)
-          )
-        ) ORDER BY data ASC, hora ASC
-      `, [hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, agoraHora, amanhaStr, agoraHora]);
+      agendamentosFuturos = await all(`SELECT * FROM (SELECT id, cliente_nome, servico, data, hora, status, preco, 'Lucas' as barber FROM agendamentos WHERE status != 'Cancelado' AND ((data = ? AND hora > ?) OR (data = ? AND hora <= ?)) UNION ALL SELECT id, cliente_nome, servico, data, hora, status, preco, 'Yuri' as barber FROM agendamentos_yuri WHERE status != 'Cancelado' AND ((data = ? AND hora > ?) OR (data = ? AND hora <= ?))) ORDER BY data ASC, hora ASC`, [hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, agoraHora, amanhaStr, agoraHora]);
     }
 
-    // INJEÇÃO DA MANUS: Estatísticas limitadas ou totais dependendo de quem logou
     let stats;
     if (isYuri) {
-      stats = await get(`
-        SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
-          SUM(CASE WHEN hora <= ? THEN 1 ELSE 0 END) as realized,
-          SUM(CASE WHEN hora > ? AND status = 'Pendente' THEN 1 ELSE 0 END) as pending_future
-        FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
-      `, [agoraHora, agoraHora, hojeStr]);
+      stats = await get(`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue, SUM(CASE WHEN hora <= ? THEN 1 ELSE 0 END) as realized, SUM(CASE WHEN hora > ? AND status = 'Pendente' THEN 1 ELSE 0 END) as pending_future FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'`, [agoraHora, agoraHora, hojeStr]);
     } else {
-      stats = await get(`
-        SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue,
-          SUM(CASE WHEN hora <= ? THEN 1 ELSE 0 END) as realized,
-          SUM(CASE WHEN hora > ? AND status = 'Pendente' THEN 1 ELSE 0 END) as pending_future
-        FROM (
-          SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado'
-          UNION ALL
-          SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'
-        )
-      `, [agoraHora, agoraHora, hojeStr, hojeStr]);
+      stats = await get(`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'Confirmado' THEN COALESCE(preco, 0) ELSE 0 END) as revenue, SUM(CASE WHEN hora <= ? THEN 1 ELSE 0 END) as realized, SUM(CASE WHEN hora > ? AND status = 'Pendente' THEN 1 ELSE 0 END) as pending_future FROM (SELECT status, preco, data, hora FROM agendamentos WHERE data = ? AND status != 'Cancelado' UNION ALL SELECT status, preco, data, hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado')`, [agoraHora, agoraHora, hojeStr, hojeStr]);
     }
 
     res.json({
