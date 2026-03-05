@@ -4,25 +4,52 @@ import { verifyToken } from './auth.js';
 
 const router = express.Router();
 
+// --- INÍCIO DOS FILTROS BLINDADOS (TRADUTORES DA IA) ---
 const limparTelefone = (telefone) => {
   if (!telefone || typeof telefone !== 'string') return null;
   const apenasNumeros = telefone.replace(/\D/g, '');
   return apenasNumeros.length > 0 ? apenasNumeros : null;
 };
 
-// Trava Global de Dias Fechados (REFORÇADA - À Prova de IA)
+const padronizarPreco = (precoRaw) => {
+  if (precoRaw === null || precoRaw === undefined || precoRaw === '') return 0;
+  if (typeof precoRaw === 'number') {
+    return precoRaw < 1000 ? Math.round(precoRaw * 100) : Math.round(precoRaw);
+  }
+  let limpo = String(precoRaw).replace(/[^\d.,]/g, '');
+  if (!limpo) return 0;
+  if (limpo.includes(',')) { limpo = limpo.replace(/\./g, '').replace(',', '.'); }
+  const valorFloat = parseFloat(limpo);
+  if (isNaN(valorFloat)) return 0;
+  return valorFloat < 1000 ? Math.round(valorFloat * 100) : Math.round(valorFloat);
+};
+
+const padronizarPagamento = (forma) => {
+  if (!forma) return 'Não informado';
+  const limpo = String(forma).toLowerCase().trim().replace(/\./g, '');
+  if (limpo.includes('crédito') || limpo.includes('credito')) return 'Cartão de Crédito';
+  if (limpo.includes('débito') || limpo.includes('debito')) return 'Cartão de Débito';
+  if (limpo.includes('dinheiro')) return 'Dinheiro';
+  if (limpo.includes('pix')) return 'Pix';
+  return String(forma).trim();
+};
+
+const padronizarServico = (servico) => {
+  if (!servico) return 'Não informado';
+  return String(servico).trim().replace(/\s+/g, ' '); 
+};
+// --- FIM DOS FILTROS BLINDADOS ---
+
 const isDiaFechado = (dataStr) => {
   if (!dataStr) return false;
   try {
     const soData = dataStr.split('T')[0].split(' ')[0];
     let ano, mes, dia;
-    
     if (soData.includes('/')) {
       [dia, mes, ano] = soData.split('/');
     } else {
       [ano, mes, dia] = soData.split('-');
     }
-    
     const dataObj = new Date(Number(ano), Number(mes) - 1, Number(dia));
     const diaSemana = dataObj.getDay();
     return diaSemana === 0 || diaSemana === 1; // 0 = Domingo, 1 = Segunda
@@ -54,7 +81,6 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// NOVA ROTA PARA A IA DO YURI: Calcula a disponibilidade exata (CORRIGIDA)
 router.get('/disponibilidade', verifyToken, async (req, res) => {
   try {
     const { data } = req.query;
@@ -64,7 +90,6 @@ router.get('/disponibilidade', verifyToken, async (req, res) => {
       return res.json({ livres: [], mensagem: 'A barbearia está fechada aos Domingos e Segundas.' });
     }
 
-    // TRADUTOR 1: Garante que a data fique YYYY-MM-DD
     let dataBanco = data;
     if (data.includes('/')) {
       const [dia, mes, ano] = data.split('/');
@@ -82,7 +107,6 @@ router.get('/disponibilidade', verifyToken, async (req, res) => {
 
     let slots = [];
     if (diaSemana === 6) { 
-      // Sábado: 08:00 às 18:00 (Com almoço 12h)
       for (let h = 8; h < 18; h++) {
         if (h !== 12) { 
           slots.push(`${h.toString().padStart(2, '0')}:00`);
@@ -90,7 +114,6 @@ router.get('/disponibilidade', verifyToken, async (req, res) => {
         }
       }
     } else { 
-      // Terça a Sexta: 09:00 às 19:00 (Com almoço 12h)
       for (let h = 9; h < 19; h++) {
         if (h !== 12) { 
           slots.push(`${h.toString().padStart(2, '0')}:00`);
@@ -112,13 +135,11 @@ router.get('/disponibilidade', verifyToken, async (req, res) => {
        return res.json({ livres: [], mensagem: 'Não é possível agendar no passado.' });
     }
 
-    // AQUI ESTAVA O ERRO! AGORA CORRIGIDO PARA BUSCAR NA TABELA DO YURI:
     const ocupados = await all(
       "SELECT hora FROM agendamentos_yuri WHERE data = ? AND status != 'Cancelado'",
       [dataBanco]
     );
 
-    // TRADUTOR 3: Previne bugs de formato de hora
     const horasOcupadas = ocupados.map(o => {
       if (!o.hora) return '';
       const partes = o.hora.split(':');
@@ -142,15 +163,17 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
     }
 
-    // NORMALIZAÇÃO: Corta os segundos para garantir que fique sempre no formato "HH:mm"
+    // APLICANDO OS FILTROS BLINDADOS ANTES DE SALVAR
+    const precoLimpo = padronizarPreco(preco);
+    const pagamentoLimpo = padronizarPagamento(forma_pagamento);
+    const servicoLimpo = padronizarServico(servico);
+    const telefoneLimpo = limparTelefone(cliente_telefone);
     const horaFormatada = hora.substring(0, 5);
 
-    // TRAVA 1: Rejeita dias fechados
     if (isDiaFechado(data) && status !== 'Bloqueado') {
       return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
     }
 
-    // TRAVA 2: ANTI-CHOQUE DE AGENDA YURI (Agora com a hora formatada)
     const horarioOcupado = await get(
       "SELECT id FROM agendamentos_yuri WHERE data = ? AND hora = ? AND status != 'Cancelado'",
       [data, horaFormatada]
@@ -160,13 +183,11 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Horário indisponível. O Yuri já tem um cliente neste horário.' });
     }
 
-    const telefoneLimpo = limparTelefone(cliente_telefone);
     const safeClienteId = cliente_id || null;
 
-    // Salvando no banco com a horaFormatada
     const result = await query(
       'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [safeClienteId, cliente_nome, telefoneLimpo, servico, data, horaFormatada, status, preco, forma_pagamento, observacoes]
+      [safeClienteId, cliente_nome, telefoneLimpo, servicoLimpo, data, horaFormatada, status, precoLimpo, pagamentoLimpo, observacoes]
     );
 
     if (status === 'Confirmado') {
@@ -191,12 +212,16 @@ router.put('/:id', verifyToken, async (req, res) => {
     const { id } = req.params;
     const { cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
 
-    // TRAVA 1: Rejeita edição para dias fechados
+    // APLICANDO OS FILTROS BLINDADOS ANTES DE SALVAR
+    const precoLimpo = padronizarPreco(preco);
+    const pagamentoLimpo = padronizarPagamento(forma_pagamento);
+    const servicoLimpo = padronizarServico(servico);
+    const telefoneLimpo = limparTelefone(cliente_telefone);
+
     if (isDiaFechado(data) && status !== 'Bloqueado') {
       return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
     }
 
-    // TRAVA 2: ANTI-CHOQUE DE AGENDA NA EDIÇÃO YURI
     const horarioOcupado = await get(
       "SELECT id FROM agendamentos_yuri WHERE data = ? AND hora = ? AND status != 'Cancelado' AND id != ?",
       [data, hora, id]
@@ -206,11 +231,9 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Horário indisponível. O Yuri já tem um cliente neste horário.' });
     }
 
-    const telefoneLimpo = limparTelefone(cliente_telefone);
-
     await query(
       'UPDATE agendamentos_yuri SET cliente_nome=?, cliente_telefone=?, servico=?, data=?, hora=?, status=?, preco=?, forma_pagamento=?, observacoes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-      [cliente_nome, telefoneLimpo, servico, data, hora, status, preco, forma_pagamento, observacoes, id]
+      [cliente_nome, telefoneLimpo, servicoLimpo, data, hora, status, precoLimpo, pagamentoLimpo, observacoes, id]
     );
 
     if (status === 'Confirmado') {
