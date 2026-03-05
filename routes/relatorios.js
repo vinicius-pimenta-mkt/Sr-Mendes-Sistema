@@ -53,7 +53,6 @@ router.get('/resumo', verifyToken, async (req, res) => {
       dFim = hojeStr;
     }
     
-    // REGRA DE OURO: Conta se não for cancelado/bloqueado E (data é antiga OU é hoje e a hora já passou)
     const timeCondition = `status NOT IN ('Cancelado', 'Bloqueado') AND (data < ? OR (data = ? AND hora <= ?))`;
     const timeParams = [hojeStr, hojeStr, agoraHora];
 
@@ -79,7 +78,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
 
     const byService = Object.values(serviceMap).sort((a, b) => b.total_qty - a.total_qty);
 
-    // 2. Evolução da Receita
+    // 2. Evolução da Receita (SOMENTE SERVIÇOS AGORA)
     const isToday = dIni === dFim && dIni === hojeStr;
     let revenueQuery = "";
     let rawRevenue = [];
@@ -110,7 +109,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       receitaDetMap[per] = (r.total || 0) / 100;
     });
 
-    // 3. Receita por Meio de Pagamento
+    // 3. Receita por Meio de Pagamento (SOMENTE SERVIÇOS AGORA)
     let paymentsQuery = "";
     if (barber === 'Geral') {
       paymentsQuery = `SELECT forma_pagamento, SUM(COALESCE(preco, 0)) as total, COUNT(*) as qty FROM (SELECT forma_pagamento, preco, status, data, hora FROM agendamentos UNION ALL SELECT forma_pagamento, preco, status, data, hora FROM agendamentos_yuri) WHERE data BETWEEN ? AND ? AND ${timeCondition} GROUP BY forma_pagamento`;
@@ -132,28 +131,28 @@ router.get('/resumo', verifyToken, async (req, res) => {
       }
     });
 
-    // 4. Vendas de Produtos (Sempre entra no faturamento independente da hora)
+    // =========================================================
+    // 4. VENDAS DE PRODUTOS (SEPARADOS DO FATURAMENTO GERAL)
+    // =========================================================
     const productSales = await all(`
-      SELECT p.nome as service, h.quantidade as qty, h.valor_total as revenue, h.forma_pagamento, h.data, h.hora
+      SELECT p.nome as service, h.quantidade as qty, h.valor_total as revenue, h.forma_pagamento
       FROM produtos_historico h JOIN produtos p ON h.produto_id = p.id
       WHERE h.tipo = 'venda' AND h.data BETWEEN ? AND ?
     `, [dIni, dFim]);
 
     const prodTableMap = {};
     productSales.forEach(ps => {
-      if(!prodTableMap[ps.service]) prodTableMap[ps.service] = { produto: ps.service, qty: 0, revenue: 0 };
-      prodTableMap[ps.service].qty += ps.qty;
-      prodTableMap[ps.service].revenue += ps.revenue / 100;
+      const formaPadronizada = padronizarPagamento(ps.forma_pagamento);
+      // Cria uma chave única juntando o nome do produto e a forma de pagamento
+      const key = `${ps.service}_${formaPadronizada}`;
       
-      const val = ps.revenue / 100;
-      const per = isToday ? ps.hora.substring(0,2)+':00' : ps.data.split('-').reverse().join('/');
-      if(receitaDetMap[per] !== undefined) receitaDetMap[per] += val; else receitaDetMap[per] = val;
-      
-      const form = padronizarPagamento(ps.forma_pagamento);
-      if(byPaymentMap[form]) byPaymentMap[form].valor += val; else byPaymentMap[form] = { valor: val, quantidade: 0 }; 
+      if(!prodTableMap[key]) {
+        prodTableMap[key] = { produto: ps.service, forma_pagamento: formaPadronizada, qty: 0, revenue: 0 };
+      }
+      prodTableMap[key].qty += ps.qty;
+      prodTableMap[key].revenue += ps.revenue / 100;
     });
 
-    // Ordenação consertada para os dias (Data correta)
     const receitaDet = Object.keys(receitaDetMap)
       .map(k => ({ periodo: k, valor: receitaDetMap[k] }))
       .sort((a,b) => {
@@ -165,6 +164,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       
     const byPayment = Object.keys(byPaymentMap).map(k => ({ forma: k, valor: byPaymentMap[k].valor, quantidade: byPaymentMap[k].quantidade })).sort((a,b) => b.valor - a.valor);
     const produtosVendidos = Object.values(prodTableMap).sort((a,b) => b.revenue - a.revenue);
+    // =========================================================
 
     // 5. Lista de Agendamentos do Relatório
     let listQuery = "";
@@ -203,7 +203,6 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const amanhaData = new Date(); amanhaData.setDate(amanhaData.getDate() + 1);
     const amanhaStr = amanhaData.toISOString().split('T')[0];
 
-    // Busca agendamentos das próximas 24h excluindo cancelados e bloqueados
     let agendamentosFuturos;
     if (isYuri) {
       agendamentosFuturos = await all(`
@@ -220,7 +219,6 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       `, [hojeStr, agoraHora, amanhaStr, agoraHora, hojeStr, agoraHora, amanhaStr, agoraHora]);
     }
 
-    // A MÁGICA DOS 4 BOXES: Guiado pelo relógio!
     let stats;
     if (isYuri) {
       stats = await get(`
