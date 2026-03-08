@@ -81,7 +81,7 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-router.get('/disponibilidade', verifyToken, async (req, res) => {
+router.get('/disponibilidade', async (req, res) => {
   try {
     const { data } = req.query;
     if (!data) return res.status(400).json({ error: 'Data é obrigatória' });
