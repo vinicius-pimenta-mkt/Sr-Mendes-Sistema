@@ -38,6 +38,15 @@ const padronizarServico = (servico) => {
   if (!servico) return 'Não informado';
   return String(servico).trim().replace(/\s+/g, ' '); 
 };
+
+// Identificador de Serviços de 1 Hora
+const isServicoLongo = (servico) => {
+  if (!servico) return false;
+  const s = servico.toLowerCase();
+  return s.includes('corte + barba') || 
+         s.includes('combo corte') || 
+         s.includes('luzes');
+};
 // --- FIM DOS FILTROS BLINDADOS ---
 
 const isDiaFechado = (dataStr) => {
@@ -150,7 +159,6 @@ router.get('/disponibilidade', async (req, res) => {
 
     res.json({ livres: horariosLivres });
   } catch (error) {
-    console.error('Erro na disponibilidade do Yuri:', error);
     res.status(500).json({ error: 'Erro ao calcular disponibilidade' });
   }
 });
@@ -163,17 +171,18 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
     }
 
-    // APLICANDO OS FILTROS BLINDADOS ANTES DE SALVAR
     const precoLimpo = padronizarPreco(preco);
     const pagamentoLimpo = padronizarPagamento(forma_pagamento);
     const servicoLimpo = padronizarServico(servico);
     const telefoneLimpo = limparTelefone(cliente_telefone);
     const horaFormatada = hora.substring(0, 5);
+    const servicoLongo = isServicoLongo(servicoLimpo);
 
     if (isDiaFechado(data) && status !== 'Bloqueado') {
       return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
     }
 
+    // Verifica o primeiro horário
     const horarioOcupado = await get(
       "SELECT id FROM agendamentos_yuri WHERE data = ? AND hora = ? AND status != 'Cancelado'",
       [data, horaFormatada]
@@ -183,12 +192,45 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Horário indisponível. O Yuri já tem um cliente neste horário.' });
     }
 
+    // LÓGICA DO SERVIÇO DE 1 HORA (Cálculo do próximo slot)
+    let horaSeguinteFormatada = null;
+    if (servicoLongo && status !== 'Bloqueado') {
+      let [h, m] = horaFormatada.split(':').map(Number);
+      m += 30;
+      if (m >= 60) { m -= 60; h += 1; }
+      horaSeguinteFormatada = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+      // Verifica se o SEGUNDO horário (a continuação) está livre
+      const horarioSeguinteOcupado = await get(
+        "SELECT id FROM agendamentos_yuri WHERE data = ? AND hora = ? AND status != 'Cancelado'",
+        [data, horaSeguinteFormatada]
+      );
+
+      // Bloqueia almoço e fim de expediente
+      if (horaSeguinteFormatada === '12:00' || horaSeguinteFormatada === '19:00' || horaSeguinteFormatada === '18:00' && new Date(data).getDay() === 6) {
+        return res.status(400).json({ error: 'Para este serviço precisamos de 1 hora. Escolha um horário que não invada o almoço ou fechamento.' });
+      }
+
+      if (horarioSeguinteOcupado) {
+        return res.status(400).json({ error: 'Este serviço leva 1 hora, mas o horário seguinte está ocupado. Por favor, escolha outro horário livre.' });
+      }
+    }
+
     const safeClienteId = cliente_id || null;
 
+    // Salva o agendamento Principal
     const result = await query(
       'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [safeClienteId, cliente_nome, telefoneLimpo, servicoLimpo, data, horaFormatada, status, precoLimpo, pagamentoLimpo, observacoes]
     );
+
+    // Salva o agendamento Clone (Trava de 1 Hora)
+    if (servicoLongo && horaSeguinteFormatada && status !== 'Bloqueado') {
+      await query(
+        'INSERT INTO agendamentos_yuri (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [safeClienteId, cliente_nome, telefoneLimpo, `${servicoLimpo} (Continuação)`, data, horaSeguinteFormatada, 'Bloqueado', 0, pagamentoLimpo, 'Bloqueio automático de 1 hora']
+      );
+    }
 
     if (status === 'Confirmado') {
       try {
@@ -212,7 +254,6 @@ router.put('/:id', verifyToken, async (req, res) => {
     const { id } = req.params;
     const { cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
 
-    // APLICANDO OS FILTROS BLINDADOS ANTES DE SALVAR
     const precoLimpo = padronizarPreco(preco);
     const pagamentoLimpo = padronizarPagamento(forma_pagamento);
     const servicoLimpo = padronizarServico(servico);
