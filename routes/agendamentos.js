@@ -13,48 +13,42 @@ const limparTelefone = (telefone) => {
 
 const padronizarPreco = (precoRaw) => {
   if (precoRaw === null || precoRaw === undefined || precoRaw === '') return 0;
-  
   if (typeof precoRaw === 'number') {
-    // Se a IA mandou como número puro (ex: 45). Multiplica pra virar centavos (4500).
     return precoRaw < 1000 ? Math.round(precoRaw * 100) : Math.round(precoRaw);
   }
-
-  // Limpa tudo que não for número, ponto ou vírgula
   let limpo = String(precoRaw).replace(/[^\d.,]/g, '');
   if (!limpo) return 0;
-
-  // Se tiver vírgula (padrão Brasil), converte pra ponto (padrão Computador)
-  if (limpo.includes(',')) {
-    limpo = limpo.replace(/\./g, '').replace(',', '.');
-  }
-
+  if (limpo.includes(',')) { limpo = limpo.replace(/\./g, '').replace(',', '.'); }
   const valorFloat = parseFloat(limpo);
   if (isNaN(valorFloat)) return 0;
-
-  // Transforma em centavos
   return valorFloat < 1000 ? Math.round(valorFloat * 100) : Math.round(valorFloat);
 };
 
 const padronizarPagamento = (forma) => {
   if (!forma) return 'Não informado';
   const limpo = String(forma).toLowerCase().trim().replace(/\./g, '');
-  
   if (limpo.includes('crédito') || limpo.includes('credito')) return 'Cartão de Crédito';
   if (limpo.includes('débito') || limpo.includes('debito')) return 'Cartão de Débito';
   if (limpo.includes('dinheiro')) return 'Dinheiro';
   if (limpo.includes('pix')) return 'Pix';
-  
-  // Se for algo diferente, só garante que está formatado bonitinho
   return String(forma).trim();
 };
 
 const padronizarServico = (servico) => {
   if (!servico) return 'Não informado';
-  return String(servico).trim().replace(/\s+/g, ' '); // Tira espaços duplos
+  return String(servico).trim().replace(/\s+/g, ' '); 
+};
+
+// Identificador de Serviços de 1 Hora
+const isServicoLongo = (servico) => {
+  if (!servico) return false;
+  const s = servico.toLowerCase();
+  return s.includes('corte + barba') || 
+         s.includes('combo corte') || 
+         s.includes('luzes'); // Adicionei luzes por precaução, remova se durar 30m
 };
 // --- FIM DOS FILTROS BLINDADOS ---
 
-// Trava Global de Dias Fechados
 const isDiaFechado = (dataStr) => {
   if (!dataStr) return false;
   try {
@@ -73,7 +67,6 @@ const isDiaFechado = (dataStr) => {
   }
 };
 
-// Listar todos os agendamentos
 router.get('/', verifyToken, async (req, res) => {
   try {
     const { data, data_inicio, data_fim, status } = req.query;
@@ -97,7 +90,6 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// NOVA ROTA PARA A IA: Calcula a disponibilidade exata
 router.get('/disponibilidade', async (req, res) => {
   try {
     const { data } = req.query;
@@ -151,12 +143,10 @@ router.get('/disponibilidade', async (req, res) => {
 
     res.json({ livres: horariosLivres });
   } catch (error) {
-    console.error('Erro na disponibilidade:', error);
     res.status(500).json({ error: 'Erro ao calcular disponibilidade' });
   }
 });
 
-// Criar novo agendamento
 router.post('/', async (req, res) => {
   try {
     const { cliente_nome, cliente_telefone, servico, data, hora, status = 'Confirmado', preco, forma_pagamento, observacoes, cliente_id } = req.body;
@@ -165,17 +155,18 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Dados obrigatórios faltando' });
     }
 
-    // APLICANDO OS FILTROS BLINDADOS ANTES DE SALVAR
     const precoLimpo = padronizarPreco(preco);
     const pagamentoLimpo = padronizarPagamento(forma_pagamento);
     const servicoLimpo = padronizarServico(servico);
     const telefoneLimpo = limparTelefone(cliente_telefone);
     const horaFormatada = hora.substring(0, 5);
+    const servicoLongo = isServicoLongo(servicoLimpo);
 
     if (isDiaFechado(data) && status !== 'Bloqueado') {
       return res.status(400).json({ error: 'A barbearia está fechada aos Domingos e Segundas-feiras.' });
     }
 
+    // Verifica o primeiro horário
     const horarioOcupado = await get(
       "SELECT id FROM agendamentos WHERE data = ? AND hora = ? AND status != 'Cancelado'",
       [data, horaFormatada]
@@ -185,12 +176,45 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Horário indisponível. Já existe um agendamento para este momento.' });
     }
 
+    // LÓGICA DO SERVIÇO DE 1 HORA (Cálculo do próximo slot)
+    let horaSeguinteFormatada = null;
+    if (servicoLongo && status !== 'Bloqueado') {
+      let [h, m] = horaFormatada.split(':').map(Number);
+      m += 30;
+      if (m >= 60) { m -= 60; h += 1; }
+      horaSeguinteFormatada = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+      // Verifica se o SEGUNDO horário (a continuação) está livre
+      const horarioSeguinteOcupado = await get(
+        "SELECT id FROM agendamentos WHERE data = ? AND hora = ? AND status != 'Cancelado'",
+        [data, horaSeguinteFormatada]
+      );
+
+      // Bloqueia almoço e fim de expediente
+      if (horaSeguinteFormatada === '12:00' || horaSeguinteFormatada === '19:00' || horaSeguinteFormatada === '18:00' && new Date(data).getDay() === 6) {
+        return res.status(400).json({ error: 'Para este serviço precisamos de 1 hora. Escolha um horário que não invada o almoço ou fechamento.' });
+      }
+
+      if (horarioSeguinteOcupado) {
+        return res.status(400).json({ error: 'Este serviço leva 1 hora, mas o horário seguinte está ocupado. Por favor, escolha outro horário livre.' });
+      }
+    }
+
     const safeClienteId = cliente_id || null;
 
+    // Salva o agendamento Principal
     const result = await query(
       'INSERT INTO agendamentos (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [safeClienteId, cliente_nome, telefoneLimpo, servicoLimpo, data, horaFormatada, status, precoLimpo, pagamentoLimpo, observacoes]
     );
+
+    // Salva o agendamento Clone (Trava de 1 Hora)
+    if (servicoLongo && horaSeguinteFormatada && status !== 'Bloqueado') {
+      await query(
+        'INSERT INTO agendamentos (cliente_id, cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [safeClienteId, cliente_nome, telefoneLimpo, `${servicoLimpo} (Continuação)`, data, horaSeguinteFormatada, 'Bloqueado', 0, pagamentoLimpo, 'Bloqueio automático de 1 hora']
+      );
+    }
 
     if (status === 'Confirmado') {
       try {
@@ -209,13 +233,11 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Atualizar agendamento
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { cliente_nome, cliente_telefone, servico, data, hora, status, preco, forma_pagamento, observacoes } = req.body;
     
-    // APLICANDO OS FILTROS BLINDADOS ANTES DE SALVAR
     const precoLimpo = padronizarPreco(preco);
     const pagamentoLimpo = padronizarPagamento(forma_pagamento);
     const servicoLimpo = padronizarServico(servico);
