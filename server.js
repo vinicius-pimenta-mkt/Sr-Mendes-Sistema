@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import rateLimit from 'express-rate-limit'; // <-- 1. IMPORTAÇÃO DA TRAVA AQUI
 
 // Importar rotas
 import authRoutes from './routes/auth.js';
@@ -36,18 +35,6 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// 3. CRIANDO E APLICANDO O ESCUDO (RATE LIMIT)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // Janela de 15 minutos
-  max: 500, // Limite de 500 requisições por IP dentro dessa janela
-  message: { error: 'Detectamos tráfego incomum. Seu IP foi bloqueado temporariamente por segurança.' },
-  standardHeaders: true, // Informa ao navegador sobre o limite nos headers
-  legacyHeaders: false,
-});
-
-// Ativando a trava para TODAS as rotas abaixo
-app.use(limiter);
 
 // Rota de teste
 app.get('/', (req, res) => {
