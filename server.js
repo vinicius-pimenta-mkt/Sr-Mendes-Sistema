@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit'; // <-- 1. IMPORTAÇÃO DA TRAVA AQUI
 
 // Importar rotas
 import authRoutes from './routes/auth.js';
@@ -24,6 +25,10 @@ console.log('Porta:', process.env.PORT || 3001);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// 2. CONFIGURAÇÃO VITAL PARA O EASYPANEL
+// Ensina o Express a pegar o IP real do usuário (e do hacker) passando pelo proxy do servidor.
+app.set('trust proxy', 1);
+
 // Middlewares
 app.use(cors({
   origin: '*', 
@@ -31,6 +36,18 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// 3. CRIANDO E APLICANDO O ESCUDO (RATE LIMIT)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // Janela de 15 minutos
+  max: 500, // Limite de 500 requisições por IP dentro dessa janela
+  message: { error: 'Detectamos tráfego incomum. Seu IP foi bloqueado temporariamente por segurança.' },
+  standardHeaders: true, // Informa ao navegador sobre o limite nos headers
+  legacyHeaders: false,
+});
+
+// Ativando a trava para TODAS as rotas abaixo
+app.use(limiter);
 
 // Rota de teste
 app.get('/', (req, res) => {
@@ -71,11 +88,9 @@ const startServer = async () => {
 };
 
 // Lógica de inicialização para Easypanel/Docker vs Vercel
-if (process.env.VERCEL || process.env.NOW_REGION) {
-  console.log('Detectado ambiente Vercel/Serverless');
-  initDatabase().catch(err => console.error('Erro Vercel Init:', err));
+if (process.env.NODE_ENV !== 'production') {
+  startServer();
 } else {
-  console.log('Detectado ambiente de Servidor (Easypanel/Docker/Local)');
   startServer();
 }
 
